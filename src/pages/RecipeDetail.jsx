@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  BookmarkPlus, CalendarCheck, Check, ChefHat, ChevronLeft, Clock, Copy, Ellipsis, Flame, FolderHeart, Heart,
+  BookOpen, CalendarCheck, Check, ChefHat, ChevronLeft, Clock, Copy, Ellipsis, Flame, FolderHeart, Heart,
   ImageDown, Link2, LoaderCircle, NotebookPen, Pencil, RotateCcw, ShoppingCart, Timer, Trash2, Users,
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -39,7 +39,7 @@ export default function RecipeDetail() {
 }
 
 /** Dùng chung cho món của mình và món xem qua link chia sẻ (shared) */
-export function RecipeView({ recipe, shared, onSave, saving }) {
+export function RecipeView({ recipe, shared }) {
   const owner = !shared
   const store = useStore()
   const { categoryMap, cookLogs, cookStats } = store
@@ -352,9 +352,9 @@ export function RecipeView({ recipe, shared, onSave, saving }) {
               <Flame size={20} /> Bắt đầu nấu
             </Link>
           ) : (
-            <button onClick={onSave} disabled={saving} className="pointer-events-auto btn-primary w-full h-13 text-base shadow-xl shadow-brand/30">
-              {saving ? <LoaderCircle size={20} className="animate-spin" /> : <BookmarkPlus size={20} />} Lưu vào sổ của tôi
-            </button>
+            <Link to={`/recipe/${recipe.id}`} className="pointer-events-auto btn-primary w-full h-13 text-base shadow-xl shadow-brand/30">
+              <BookOpen size={20} /> Mở trong sổ tay
+            </Link>
           )}
         </div>
       </div>

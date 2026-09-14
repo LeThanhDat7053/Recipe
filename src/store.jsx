@@ -1,16 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './lib/api'
-import { auth, emptyDb, isCloud, isNetworkError } from './lib/api'
+import { emptyDb, isCloud, isNetworkError } from './lib/api'
 import { createSeed } from './lib/seed'
 import { daysSince, mergeShopping, nowISO, parseIngredientLine, recipeImages, uid } from './lib/utils'
 import { useToast } from './components/Toast'
 
 const StoreContext = createContext(null)
 
-const LOCAL_KEY = 'recipebook:local:v1'
-const dataKey = (userId) => (isCloud ? `recipebook:cache:v2:${userId}` : LOCAL_KEY)
-const queueKey = (userId) => `recipebook:queue:v1:${userId}`
-export const PENDING_SHARE_KEY = 'recipebook:pending-share'
+// Một sổ tay chung cho cả gia đình
+const DATA_KEY = isCloud ? 'recipebook:cache:family:v1' : 'recipebook:local:v1'
+const QUEUE_KEY = 'recipebook:queue:family:v1'
+const REFRESH_EVERY = 45000 // tự tải lại để thấy thay đổi của người khác
 
 const readJSON = (key) => {
   try {
@@ -27,16 +27,23 @@ const writeJSON = (key, value) => {
     return false
   }
 }
-const clearCaches = () => {
+
+/** Bản cũ lưu cache & hàng đợi theo từng tài khoản -> dọn cache, gộp hàng đợi về một */
+function migrateOldStorage() {
   try {
-    Object.keys(localStorage)
-      .filter((k) => k.startsWith('recipebook:cache:'))
-      .forEach((k) => localStorage.removeItem(k))
+    const oldOps = []
+    Object.keys(localStorage).forEach((k) => {
+      if (k.startsWith('recipebook:cache:v2:')) localStorage.removeItem(k)
+      if (k.startsWith('recipebook:queue:v1:')) {
+        oldOps.push(...(readJSON(k) || []))
+        localStorage.removeItem(k)
+      }
+    })
+    if (oldOps.length) writeJSON(QUEUE_KEY, [...(readJSON(QUEUE_KEY) || []), ...oldOps])
   } catch { /* ignore */ }
 }
 
-// _owner: dữ liệu đang hiển thị thuộc tài khoản nào (tránh ghi nhầm cache giữa các tài khoản)
-const normalizeDb = (raw, owner) => ({ ...emptyDb(), ...(raw || {}), _owner: owner })
+const normalizeDb = (raw) => ({ ...emptyDb(), ...(raw || {}) })
 const bySort = (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
 const nextOrder = (list) => Math.max(0, ...list.map((x) => x.sort_order ?? 0)) + 1
 
@@ -61,19 +68,19 @@ const RECIPE_DEFAULTS = {
 
 export function StoreProvider({ children }) {
   const toast = useToast()
-  const [db, setDb] = useState(() => normalizeDb(null, null))
-  const [loading, setLoading] = useState(true)
+  const [initial] = useState(() => {
+    migrateOldStorage()
+    const cached = readJSON(DATA_KEY)
+    return { data: cached || (isCloud ? null : createSeed()), cached: !!cached, queue: readJSON(QUEUE_KEY) || [] }
+  })
+  const [db, setDb] = useState(() => normalizeDb(initial.data))
+  const [loading, setLoading] = useState(isCloud && !initial.cached)
   const [error, setError] = useState(null)
-  // undefined = đang đọc phiên đăng nhập, null = chưa đăng nhập
-  const [session, setSession] = useState(isCloud ? undefined : null)
-  const [pendingCount, setPendingCount] = useState(0)
+  const [pendingCount, setPendingCount] = useState(initial.queue.length)
 
-  const userId = isCloud ? session?.user?.id ?? null : 'local'
-  const userRef = useRef(userId)
-  userRef.current = userId
   const dbRef = useRef(db)
   dbRef.current = db
-  const queueRef = useRef([])
+  const queueRef = useRef(initial.queue)
   const flushingRef = useRef(false)
   const purgedRef = useRef(false)
 
@@ -81,7 +88,7 @@ export function StoreProvider({ children }) {
   const setQueue = useCallback((q) => {
     queueRef.current = q
     setPendingCount(q.length)
-    if (userRef.current) writeJSON(queueKey(userRef.current), q)
+    writeJSON(QUEUE_KEY, q)
   }, [])
 
   const applyOp = useCallback((op) => {
@@ -106,7 +113,6 @@ export function StoreProvider({ children }) {
   const flush = useCallback(async () => {
     if (!isCloud || !queueRef.current.length) return true
     if (flushingRef.current) return null
-    const owner = userRef.current
     flushingRef.current = true
     let dropped = 0
     try {
@@ -118,7 +124,6 @@ export function StoreProvider({ children }) {
           dropped++
           console.error('Bỏ thay đổi lỗi:', e)
         }
-        if (userRef.current !== owner) return false
         setQueue(queueRef.current.slice(1))
       }
       return true
@@ -129,10 +134,9 @@ export function StoreProvider({ children }) {
   }, [setQueue, toast])
 
   const refresh = useCallback(async () => {
-    const owner = userRef.current
-    if (!isCloud || !owner) return
+    if (!isCloud) return
     const synced = await flush()
-    if (synced === null || userRef.current !== owner) return
+    if (synced === null) return
     if (!synced) {
       setError('offline')
       setLoading(false)
@@ -140,60 +144,35 @@ export function StoreProvider({ children }) {
     }
     try {
       const data = await api.fetchAll()
-      if (userRef.current !== owner || queueRef.current.length) return
-      setDb(normalizeDb(data, owner))
+      if (queueRef.current.length) return
+      setDb(normalizeDb(data))
       setError(null)
     } catch (e) {
-      if (userRef.current === owner) setError(isNetworkError(e) ? 'offline' : e.message || 'Không tải được dữ liệu')
+      setError(isNetworkError(e) ? 'offline' : e.message || 'Không tải được dữ liệu')
     } finally {
-      if (userRef.current === owner) setLoading(false)
+      setLoading(false)
     }
   }, [flush])
 
-  /* ---------------- Phiên đăng nhập ---------------- */
   useEffect(() => {
-    if (!isCloud) return
-    auth.getSession().then((s) => setSession((prev) => (prev === undefined ? s ?? null : prev)))
-    return auth.onChange((s) => setSession(s ?? null))
-  }, [])
-
-  // Đổi tài khoản -> nạp dữ liệu đã lưu của người đó rồi tải mới
-  useEffect(() => {
-    purgedRef.current = false
-    if (!userId) {
-      setDb(normalizeDb(null, null))
-      queueRef.current = []
-      setPendingCount(0)
-      setError(null)
-      setLoading(false)
-      return
-    }
-    let data = readJSON(dataKey(userId))
-    if (!isCloud && !data) data = createSeed()
-    setDb(normalizeDb(data, userId))
-    queueRef.current = readJSON(queueKey(userId)) || []
-    setPendingCount(queueRef.current.length)
-    setError(null)
-    setLoading(isCloud && !data)
     refresh()
-  }, [userId, refresh])
+  }, [refresh])
 
   // Lưu xuống máy (local: là dữ liệu chính, cloud: là cache để mở nhanh + xem offline)
   useEffect(() => {
-    if (!userId || db._owner !== userId || (isCloud && loading)) return
-    const { _owner, ...data } = db
-    if (!writeJSON(dataKey(userId), data) && !isCloud) {
-      toast('Bộ nhớ trình duyệt đã đầy. Hãy xoá bớt ảnh.', 'error')
-    }
-  }, [db, userId, loading, toast])
+    if (isCloud && loading) return
+    if (!writeJSON(DATA_KEY, db) && !isCloud) toast('Bộ nhớ trình duyệt đã đầy. Hãy xoá bớt ảnh.', 'error')
+  }, [db, loading, toast])
 
   useEffect(() => {
     if (!isCloud) return
     const onOnline = () => refresh()
     const onVisible = () => document.visibilityState === 'visible' && refresh()
+    const id = setInterval(() => document.visibilityState === 'visible' && navigator.onLine && refresh(), REFRESH_EVERY)
     window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      clearInterval(id)
       window.removeEventListener('online', onOnline)
       document.removeEventListener('visibilitychange', onVisible)
     }
@@ -268,16 +247,6 @@ export function StoreProvider({ children }) {
       return row
     }
 
-    const copyRecipe = (recipe) => {
-      const { id, user_id, author_name, share_id, deleted_at, created_at, updated_at, category_id, is_favorite, rating, ...rest } = recipe
-      return saveRecipe({ ...rest })
-    }
-
-    const getShared = async (shareId) => {
-      if (!isCloud) return dbRef.current.recipes.find((r) => r.share_id === shareId && !r.deleted_at) || null
-      return api.getSharedRecipe(shareId)
-    }
-
     const addShoppingItems = async (items, recipeTitle = '') => {
       const base = Date.now()
       const incoming = items
@@ -301,7 +270,6 @@ export function StoreProvider({ children }) {
       refresh,
       saveRecipe,
       updateRecipe,
-      copyRecipe,
       cleanupImages,
       toggleFavorite: (r) => updateRecipe(r, { is_favorite: !latestRecipe(r).is_favorite }),
       setRating: (r, rating) => updateRecipe(r, { rating }),
@@ -349,33 +317,22 @@ export function StoreProvider({ children }) {
       },
       removeShopping: (ids) => remove('shopping_items', ids),
 
-      getShared,
-      async importShared(shareId) {
-        const recipe = await getShared(shareId)
-        if (!recipe) throw new Error('Link chia sẻ không còn hiệu lực')
-        return copyRecipe(recipe)
+      async getShared(shareId) {
+        if (!isCloud) return dbRef.current.recipes.find((r) => r.share_id === shareId && !r.deleted_at) || null
+        return api.getSharedRecipe(shareId)
       },
       importFromUrl: api.importFromUrl,
       uploadImage: api.uploadImage,
-
-      signIn: auth.signIn,
-      signUp: auth.signUp,
-      updatePassword: auth.updatePassword,
-      async signOut() {
-        clearCaches()
-        await auth.signOut()
-        setSession(null)
-      },
     }
   }, [write, refresh])
 
   // Tự dọn món trong thùng rác quá 30 ngày
   useEffect(() => {
-    if (loading || purgedRef.current || !userId || db._owner !== userId) return
+    if (loading || purgedRef.current) return
     purgedRef.current = true
     const expired = db.recipes.filter((r) => r.deleted_at && daysSince(r.deleted_at) > 30)
     if (expired.length) actions.purgeRecipes(expired).catch(() => {})
-  }, [loading, db, userId, actions])
+  }, [loading, db, actions])
 
   const value = useMemo(() => {
     const recipes = db.recipes
@@ -405,14 +362,11 @@ export function StoreProvider({ children }) {
       loading,
       error,
       pendingCount,
-      session,
-      user: session?.user ?? null,
       isCloud,
-      authReady: session !== undefined,
-      canEdit: !isCloud || !!session,
+      canEdit: true,
       ...actions,
     }
-  }, [db, loading, error, pendingCount, session, actions])
+  }, [db, loading, error, pendingCount, actions])
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

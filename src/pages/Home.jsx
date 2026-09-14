@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronRight, CloudOff, RefreshCw, Search, Shuffle, UserRound } from 'lucide-react'
+import { ChevronRight, CloudOff, RefreshCw, Search, Settings, Shuffle } from 'lucide-react'
 import { useStore } from '../store'
 import { RecipeListSkeleton, RecipeRow, RecipeTile } from '../components/RecipeCard'
 import { EmptyState } from '../components/ui'
@@ -16,9 +16,8 @@ function greeting(name) {
 }
 
 export default function Home() {
-  const { recipes, categories, cookStats, shoppingItems, loading, error, pendingCount, canEdit, user } = useStore()
+  const { recipes, categories, cookStats, shoppingItems, loading, error, pendingCount, canEdit } = useStore()
   const navigate = useNavigate()
-  const name = user?.user_metadata?.full_name
 
   const favorites = useMemo(() => recipes.filter((r) => r.is_favorite), [recipes])
   const stale = useMemo(
@@ -47,7 +46,7 @@ export default function Home() {
       <header className="px-4 pt-5 pb-3">
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-muted truncate">{greeting(name)}</p>
+            <p className="text-sm text-muted truncate">{greeting()}</p>
             <h1 className="mt-0.5 text-[1.75rem] leading-tight font-bold tracking-tight">Hôm nay nấu gì?</h1>
           </div>
           {recipes.length > 1 && (
@@ -55,8 +54,8 @@ export default function Home() {
               <Shuffle size={20} />
             </button>
           )}
-          <Link to="/account" className="icon-btn bg-ink text-bg font-bold uppercase" aria-label="Tài khoản">
-            {name || user?.email ? (name || user.email)[0] : <UserRound size={20} />}
+          <Link to="/account" className="icon-btn bg-surface border border-line" aria-label="Cài đặt">
+            <Settings size={20} />
           </Link>
         </div>
 

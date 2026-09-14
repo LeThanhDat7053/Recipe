@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getVoiceSettings, pickVoice, prepareSpeech } from './speech'
 
 /** State lưu trong sessionStorage — giữ tick nguyên liệu khi chuyển trang */
 export function useSessionState(key, initial) {
@@ -48,31 +49,58 @@ export function useWakeLock(initial = false) {
   return { supported, on, toggle: () => setOn((v) => !v) }
 }
 
-/** Đọc to bằng giọng có sẵn trên máy */
+const speechSupported = () => typeof window !== 'undefined' && 'speechSynthesis' in window
+
+/** Danh sách giọng trên máy (trình duyệt nạp bất đồng bộ) */
+export function useVoices() {
+  const [voices, setVoices] = useState(() => (speechSupported() ? window.speechSynthesis.getVoices() : []))
+  useEffect(() => {
+    if (!speechSupported()) return
+    const update = () => setVoices(window.speechSynthesis.getVoices())
+    update()
+    window.speechSynthesis.addEventListener?.('voiceschanged', update)
+    return () => window.speechSynthesis.removeEventListener?.('voiceschanged', update)
+  }, [])
+  return voices
+}
+
+/** Đọc to bằng giọng có sẵn trên máy, theo cài đặt giọng đọc của người dùng */
 export function useSpeech() {
-  const supported = typeof window !== 'undefined' && 'speechSynthesis' in window
+  const supported = speechSupported()
   const [speaking, setSpeaking] = useState(false)
+  const session = useRef(0)
 
   const stop = useCallback(() => {
     if (!supported) return
+    session.current++
     window.speechSynthesis.cancel()
     setSpeaking(false)
   }, [supported])
 
+  /** overrides: { voiceURI, rate, pitch } để nghe thử trước khi lưu */
   const speak = useCallback(
-    (text) => {
+    (text, overrides) => {
       if (!supported || !text) return
       const synth = window.speechSynthesis
       synth.cancel()
-      const u = new SpeechSynthesisUtterance(text)
-      u.lang = 'vi-VN'
-      const voice = synth.getVoices().find((v) => v.lang?.toLowerCase().replace('_', '-').startsWith('vi'))
-      if (voice) u.voice = voice
-      u.rate = 0.95
-      u.onend = () => setSpeaking(false)
-      u.onerror = () => setSpeaking(false)
+      const id = ++session.current
+      const settings = { ...getVoiceSettings(), ...overrides }
+      const voice = pickVoice(synth.getVoices(), settings.voiceURI)
+      const chunks = prepareSpeech(text)
+      if (!chunks.length) return
+      chunks.forEach((chunk, i) => {
+        const u = new SpeechSynthesisUtterance(chunk)
+        u.lang = voice?.lang || 'vi-VN'
+        if (voice) u.voice = voice
+        u.rate = settings.rate
+        u.pitch = settings.pitch
+        if (i === chunks.length - 1) {
+          u.onend = () => session.current === id && setSpeaking(false)
+        }
+        u.onerror = () => session.current === id && setSpeaking(false)
+        synth.speak(u)
+      })
       setSpeaking(true)
-      synth.speak(u)
     },
     [supported],
   )

@@ -6,7 +6,8 @@ const URL_ = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/(rest|auth)\/v
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 const BUCKET = 'recipe-images'
 
-export const supabase = URL_ && KEY ? createClient(URL_, KEY) : null
+// Sổ tay dùng chung cả gia đình: không đăng nhập
+export const supabase = URL_ && KEY ? createClient(URL_, KEY, { auth: { persistSession: false, autoRefreshToken: false } }) : null
 export const isCloud = !!supabase
 
 /** Các bảng và cột được phép ghi */
@@ -57,9 +58,7 @@ export async function uploadImage(file, maxSize = 1280) {
   if (!supabase) return blobToDataURL(await compressImage(file, Math.min(maxSize, 800), 0.72))
   const blob = await compressImage(file, maxSize)
   const ext = blob.type === 'image/webp' ? 'webp' : 'jpg'
-  const { data: auth } = await supabase.auth.getSession()
-  if (!auth.session) throw new Error('Phiên đăng nhập đã hết, hãy đăng nhập lại')
-  const path = `${auth.session.user.id}/${uid()}.${ext}`
+  const path = `images/${uid()}.${ext}`
   const { error } = await supabase.storage
     .from(BUCKET)
     .upload(path, blob, { contentType: blob.type, cacheControl: '31536000' })
@@ -85,14 +84,9 @@ export async function getSharedRecipe(shareId) {
 }
 
 export async function importFromUrl(link) {
-  const headers = {}
-  if (supabase) {
-    const { data } = await supabase.auth.getSession()
-    if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`
-  }
   let res
   try {
-    res = await fetch(`/.netlify/functions/import-recipe?url=${encodeURIComponent(link)}`, { headers })
+    res = await fetch(`/.netlify/functions/import-recipe?url=${encodeURIComponent(link)}`)
   } catch {
     throw new Error('Không có kết nối mạng')
   }
@@ -102,59 +96,4 @@ export async function importFromUrl(link) {
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || 'Không đọc được trang này')
   return body
-}
-
-/* ------------------------------------------------------------------ */
-/* Xác thực                                                            */
-/* ------------------------------------------------------------------ */
-export const auth = {
-  async getSession() {
-    if (!supabase) return null
-    const { data } = await supabase.auth.getSession()
-    return data.session
-  },
-  onChange(cb) {
-    if (!supabase) return () => {}
-    const { data } = supabase.auth.onAuthStateChange((_e, session) => cb(session))
-    return () => data.subscription.unsubscribe()
-  },
-  async signIn(email, password) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw translateAuthError(error)
-  },
-  /** Trả về true nếu cần xác nhận email trước khi đăng nhập */
-  async signUp(name, email, password) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: name }, emailRedirectTo: window.location.origin },
-    })
-    if (error) throw translateAuthError(error)
-    if (data.user && data.user.identities?.length === 0) throw new Error('Email này đã có tài khoản')
-    return !data.session
-  },
-  async updatePassword(password) {
-    const { error } = await supabase.auth.updateUser({ password })
-    if (error) throw translateAuthError(error)
-  },
-  async signOut() {
-    await supabase?.auth.signOut({ scope: 'local' })
-  },
-}
-
-function translateAuthError(error) {
-  const msg = error.message || ''
-  const map = [
-    [/invalid login credentials/i, 'Sai email hoặc mật khẩu'],
-    [/email not confirmed/i, 'Email chưa được xác nhận. Hãy mở email và bấm vào link xác nhận.'],
-    [/already registered|already exists/i, 'Email này đã có tài khoản'],
-    [/password should be at least|weak password/i, 'Mật khẩu quá yếu (tối thiểu 6 ký tự)'],
-    [/rate limit|too many/i, 'Thao tác quá nhiều lần, hãy thử lại sau ít phút'],
-    [/signups not allowed|signup is disabled/i, 'Hiện không cho phép tạo tài khoản mới'],
-    [/unable to validate email|invalid email/i, 'Email không hợp lệ'],
-    [/same password|different from the old/i, 'Mật khẩu mới phải khác mật khẩu cũ'],
-    [/failed to fetch|network/i, 'Không có kết nối mạng'],
-  ]
-  const found = map.find(([re]) => re.test(msg))
-  return new Error(found ? found[1] : msg)
 }

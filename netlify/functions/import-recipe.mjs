@@ -18,16 +18,6 @@ export default async (req) => {
     return json(400, { error: 'Link không hợp lệ' })
   }
 
-  // Chỉ người đã đăng nhập mới dùng được (tránh bị lợi dụng làm proxy)
-  const supaUrl = (process.env.VITE_SUPABASE_URL || '').trim().replace(/\/(rest|auth)\/v1.*$/, '').replace(/\/+$/, '')
-  const supaKey = (process.env.VITE_SUPABASE_ANON_KEY || '').trim()
-  if (supaUrl && supaKey) {
-    const authorization = req.headers.get('authorization')
-    if (!authorization) return json(401, { error: 'Cần đăng nhập' })
-    const check = await fetch(`${supaUrl}/auth/v1/user`, { headers: { apikey: supaKey, authorization } }).catch(() => null)
-    if (!check?.ok) return json(401, { error: 'Phiên đăng nhập đã hết, hãy đăng nhập lại' })
-  }
-
   let html
   try {
     const res = await fetch(url, {

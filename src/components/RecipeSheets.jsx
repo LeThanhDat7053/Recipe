@@ -112,7 +112,7 @@ export function ShareSheet({ open, onClose, recipe }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold">Chia sẻ bằng link</p>
-                <p className="text-sm text-muted">Ai có link đều xem được món này, không cần tài khoản.</p>
+                <p className="text-sm text-muted">Gửi link để người khác xem riêng món này.</p>
               </div>
               <Switch checked={!!recipe.share_id} onChange={toggle} disabled={busy} label="Bật chia sẻ" />
             </div>
@@ -137,7 +137,7 @@ export function ShareSheet({ open, onClose, recipe }) {
                     <Share2 size={18} /> Gửi
                   </button>
                 </div>
-                <p className="text-xs text-muted">Người nhận có thể bấm "Lưu vào sổ của tôi" để chép món về tài khoản của họ.</p>
+                <p className="text-xs text-muted">Tắt chia sẻ thì link cũ không mở được nữa.</p>
               </div>
             )}
           </>

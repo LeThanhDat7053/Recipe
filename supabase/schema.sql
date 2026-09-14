@@ -1,13 +1,26 @@
 -- ============================================================
+-- SỔ TAY DÙNG CHUNG CHO CẢ GIA ĐÌNH — KHÔNG CẦN TÀI KHOẢN
 -- Chạy toàn bộ file này trong Supabase: SQL Editor -> New query -> Run
--- Chạy lại nhiều lần vẫn an toàn (không mất dữ liệu).
--- Mỗi tài khoản có dữ liệu riêng, không ai xem được của ai.
+-- Chạy lại nhiều lần vẫn an toàn.
+--
+-- ⚠️ Ai có link web đều xem và sửa được. Đừng chia sẻ link công khai,
+--    và nhớ thỉnh thoảng bấm "Xuất" sao lưu trong trang Cài đặt.
 -- ============================================================
+
+-- Gỡ luật bảo mật theo từng tài khoản của bản cũ (nếu có)
+drop policy if exists "read categories" on public.categories;
+drop policy if exists "write categories" on public.categories;
+drop policy if exists "read recipes" on public.recipes;
+drop policy if exists "write recipes" on public.recipes;
+drop policy if exists "own categories" on public.categories;
+drop policy if exists "own recipes" on public.recipes;
+drop policy if exists "own cook_logs" on public.cook_logs;
+drop policy if exists "own collections" on public.collections;
+drop policy if exists "own shopping_items" on public.shopping_items;
 
 -- ---------------- Danh mục ----------------
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name text not null,
   icon text not null default '🍽️',
   sort_order int not null default 0,
@@ -17,7 +30,6 @@ create table if not exists public.categories (
 -- ---------------- Công thức ----------------
 create table if not exists public.recipes (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   title text not null,
   description text default '',
   category_id uuid references public.categories(id) on delete set null,
@@ -35,17 +47,13 @@ create table if not exists public.recipes (
   updated_at timestamptz not null default now()
 );
 
--- Cột bổ sung (an toàn khi đã có bảng từ bản cũ)
-alter table public.categories add column if not exists user_id uuid default auth.uid() references auth.users(id) on delete cascade;
-alter table public.recipes add column if not exists user_id uuid default auth.uid() references auth.users(id) on delete cascade;
-alter table public.recipes add column if not exists rating int not null default 0;          -- 0..5 sao
-alter table public.recipes add column if not exists share_id uuid unique;                   -- link chia sẻ công khai
-alter table public.recipes add column if not exists deleted_at timestamptz;                 -- thùng rác
+alter table public.recipes add column if not exists rating int not null default 0;
+alter table public.recipes add column if not exists share_id uuid unique;
+alter table public.recipes add column if not exists deleted_at timestamptz;
 
 -- ---------------- Nhật ký nấu ----------------
 create table if not exists public.cook_logs (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   recipe_id uuid not null references public.recipes(id) on delete cascade,
   cooked_at timestamptz not null default now(),
   note text not null default ''
@@ -54,7 +62,6 @@ create table if not exists public.cook_logs (
 -- ---------------- Bộ sưu tập ----------------
 create table if not exists public.collections (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name text not null,
   icon text not null default '📁',
   recipe_ids uuid[] not null default '{}',
@@ -65,7 +72,6 @@ create table if not exists public.collections (
 -- ---------------- Danh sách đi chợ ----------------
 create table if not exists public.shopping_items (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name text not null,
   amount text not null default '',
   unit text not null default '',
@@ -75,13 +81,15 @@ create table if not exists public.shopping_items (
   created_at timestamptz not null default now()
 );
 
-create index if not exists categories_user_idx on public.categories(user_id);
-create index if not exists recipes_user_idx on public.recipes(user_id);
+-- Bản cũ có cột user_id (dữ liệu theo tài khoản) -> không dùng nữa
+alter table public.categories drop column if exists user_id;
+alter table public.recipes drop column if exists user_id;
+alter table public.cook_logs drop column if exists user_id;
+alter table public.collections drop column if exists user_id;
+alter table public.shopping_items drop column if exists user_id;
+
 create index if not exists recipes_category_idx on public.recipes(category_id);
-create index if not exists cook_logs_user_idx on public.cook_logs(user_id);
 create index if not exists cook_logs_recipe_idx on public.cook_logs(recipe_id);
-create index if not exists collections_user_idx on public.collections(user_id);
-create index if not exists shopping_items_user_idx on public.shopping_items(user_id);
 
 -- Tự cập nhật updated_at
 create or replace function public.touch_updated_at() returns trigger
@@ -93,87 +101,90 @@ create trigger recipes_touch before update on public.recipes
 for each row execute function public.touch_updated_at();
 
 -- ------------------------------------------------------------
--- Bảo mật (RLS): mỗi người chỉ đọc/ghi dữ liệu của chính mình
+-- Quyền truy cập: ai mở web cũng xem & sửa được (không cần đăng nhập)
 -- ------------------------------------------------------------
-drop policy if exists "read categories" on public.categories;
-drop policy if exists "write categories" on public.categories;
-drop policy if exists "read recipes" on public.recipes;
-drop policy if exists "write recipes" on public.recipes;
-
 alter table public.categories enable row level security;
 alter table public.recipes enable row level security;
 alter table public.cook_logs enable row level security;
 alter table public.collections enable row level security;
 alter table public.shopping_items enable row level security;
 
-drop policy if exists "own categories" on public.categories;
-create policy "own categories" on public.categories for all to authenticated
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+drop policy if exists "family categories" on public.categories;
+create policy "family categories" on public.categories for all to anon, authenticated using (true) with check (true);
 
-drop policy if exists "own recipes" on public.recipes;
-create policy "own recipes" on public.recipes for all to authenticated
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+drop policy if exists "family recipes" on public.recipes;
+create policy "family recipes" on public.recipes for all to anon, authenticated using (true) with check (true);
 
-drop policy if exists "own cook_logs" on public.cook_logs;
-create policy "own cook_logs" on public.cook_logs for all to authenticated
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+drop policy if exists "family cook_logs" on public.cook_logs;
+create policy "family cook_logs" on public.cook_logs for all to anon, authenticated using (true) with check (true);
 
-drop policy if exists "own collections" on public.collections;
-create policy "own collections" on public.collections for all to authenticated
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+drop policy if exists "family collections" on public.collections;
+create policy "family collections" on public.collections for all to anon, authenticated using (true) with check (true);
 
-drop policy if exists "own shopping_items" on public.shopping_items;
-create policy "own shopping_items" on public.shopping_items for all to authenticated
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+drop policy if exists "family shopping_items" on public.shopping_items;
+create policy "family shopping_items" on public.shopping_items for all to anon, authenticated using (true) with check (true);
 
 -- ------------------------------------------------------------
--- Xem công thức qua link chia sẻ (không cần đăng nhập)
--- Chỉ trả về đúng 1 món theo mã bí mật, không liệt kê được món khác
+-- Xem một món qua link chia sẻ
 -- ------------------------------------------------------------
 create or replace function public.get_shared_recipe(p_share_id uuid) returns jsonb
 language sql stable security definer set search_path = public as $$
-  select (to_jsonb(r) - 'user_id')
-         || jsonb_build_object('author_name', coalesce(u.raw_user_meta_data->>'full_name', ''))
-  from public.recipes r
-  join auth.users u on u.id = r.user_id
+  select to_jsonb(r) from public.recipes r
   where r.share_id = p_share_id and r.deleted_at is null
 $$;
 revoke all on function public.get_shared_recipe(uuid) from public;
 grant execute on function public.get_shared_recipe(uuid) to anon, authenticated;
 
 -- ------------------------------------------------------------
--- Kho ảnh: mỗi người upload vào thư mục <user_id>/...
+-- Kho ảnh
 -- ------------------------------------------------------------
 insert into storage.buckets (id, name, public)
 values ('recipe-images', 'recipe-images', true)
 on conflict (id) do nothing;
 
+drop policy if exists "read recipe images" on storage.objects;
+create policy "read recipe images" on storage.objects for select to anon, authenticated
+  using (bucket_id = 'recipe-images');
 drop policy if exists "upload recipe images" on storage.objects;
-create policy "upload recipe images" on storage.objects for insert to authenticated
-  with check (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "upload recipe images" on storage.objects for insert to anon, authenticated
+  with check (bucket_id = 'recipe-images');
 drop policy if exists "update recipe images" on storage.objects;
-create policy "update recipe images" on storage.objects for update to authenticated
-  using (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "update recipe images" on storage.objects for update to anon, authenticated
+  using (bucket_id = 'recipe-images');
 drop policy if exists "delete recipe images" on storage.objects;
-create policy "delete recipe images" on storage.objects for delete to authenticated
-  using (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "delete recipe images" on storage.objects for delete to anon, authenticated
+  using (bucket_id = 'recipe-images');
 
 -- ------------------------------------------------------------
--- Tài khoản mới tự có sẵn 6 danh mục
+-- Không còn tạo danh mục theo tài khoản
 -- ------------------------------------------------------------
-create or replace function public.create_default_categories() returns trigger
-language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.categories (user_id, name, icon, sort_order) values
-    (new.id, 'Món mặn', '🍖', 1),
-    (new.id, 'Canh & Súp', '🍲', 2),
-    (new.id, 'Món xào', '🥘', 3),
-    (new.id, 'Món chay', '🥗', 4),
-    (new.id, 'Tráng miệng', '🍮', 5),
-    (new.id, 'Đồ uống', '🧋', 6);
-  return new;
-end $$;
-
 drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created after insert on auth.users
-for each row execute function public.create_default_categories();
+drop function if exists public.create_default_categories();
+
+-- Gộp danh mục trùng tên (bản cũ mỗi tài khoản có một bộ danh mục riêng)
+with ranked as (
+  select id, first_value(id) over (partition by lower(trim(name)) order by created_at, id) as keep_id
+  from public.categories
+)
+update public.recipes r set category_id = ranked.keep_id
+from ranked
+where r.category_id = ranked.id and ranked.id <> ranked.keep_id;
+
+delete from public.categories c
+using (
+  select id, first_value(id) over (partition by lower(trim(name)) order by created_at, id) as keep_id
+  from public.categories
+) d
+where c.id = d.id and d.id <> d.keep_id;
+
+-- Sổ còn trống thì tạo sẵn 6 danh mục
+insert into public.categories (name, icon, sort_order)
+select * from (values
+  ('Món mặn', '🍖', 1),
+  ('Canh & Súp', '🍲', 2),
+  ('Món xào', '🥘', 3),
+  ('Món chay', '🥗', 4),
+  ('Tráng miệng', '🍮', 5),
+  ('Đồ uống', '🧋', 6)
+) as v(name, icon, sort_order)
+where not exists (select 1 from public.categories);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, ListChecks, PartyPopper, RotateCcw, Timer, Volume2, VolumeX, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ListChecks, PartyPopper, RotateCcw, SlidersHorizontal, Timer, Volume2, VolumeX, X } from 'lucide-react'
+import { VoiceSheet } from '../components/VoiceSheet'
 import { useStore } from '../store'
 import { TimerList, useTimers } from '../timers'
 import { useToast } from '../components/Toast'
@@ -112,9 +113,14 @@ function Cook({ recipe }) {
             {wake.on && <p className="text-[11px] text-muted leading-tight">Màn hình luôn sáng</p>}
           </div>
           {speech.supported && (
-            <button onClick={toggleRead} className={cx('icon-btn', autoRead && 'bg-brand-soft text-brand')} aria-label="Đọc to">
-              {autoRead ? <Volume2 size={22} /> : <VolumeX size={22} />}
-            </button>
+            <>
+              <button onClick={() => setSheet('voice')} className="icon-btn" aria-label="Cài đặt giọng đọc">
+                <SlidersHorizontal size={20} />
+              </button>
+              <button onClick={toggleRead} className={cx('icon-btn', autoRead && 'bg-brand-soft text-brand')} aria-label="Đọc to">
+                {autoRead ? <Volume2 size={22} /> : <VolumeX size={22} />}
+              </button>
+            </>
           )}
           <button onClick={() => setSheet('ing')} className="icon-btn" aria-label="Nguyên liệu">
             <ListChecks size={22} />
@@ -225,6 +231,8 @@ function Cook({ recipe }) {
           </button>
         )}
       </Sheet>
+
+      <VoiceSheet open={sheet === 'voice'} onClose={() => setSheet(null)} />
 
       <LogSheet
         open={sheet === 'log'}
