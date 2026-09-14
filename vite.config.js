@@ -53,5 +53,17 @@ export default defineConfig({
   ],
   build: {
     target: 'es2020',
+    rolldownOptions: {
+      output: {
+        // Thư viện ít thay đổi -> chunk riêng, cập nhật app không phải tải lại
+        advancedChunks: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/ },
+            { name: 'supabase', test: /node_modules[\\/]@supabase[\\/]/ },
+            { name: 'icons', test: /node_modules[\\/]lucide-react[\\/]/ },
+          ],
+        },
+      },
+    },
   },
 })

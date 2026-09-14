@@ -1,9 +1,9 @@
 import { NavLink, Link } from 'react-router-dom'
-import { House, LayoutGrid, Plus, Search, UserRound } from 'lucide-react'
+import { House, LayoutGrid, Plus, Search, ShoppingCart } from 'lucide-react'
 import { useStore } from '../store'
 import { cx } from '../lib/utils'
 
-const Item = ({ to, label, icon: Icon, end }) => (
+const Item = ({ to, label, icon: Icon, end, badge }) => (
   <NavLink
     to={to}
     end={end}
@@ -16,8 +16,13 @@ const Item = ({ to, label, icon: Icon, end }) => (
   >
     {({ isActive }) => (
       <>
-        <span className={cx('grid place-items-center h-8 w-14 rounded-full transition', isActive && 'bg-brand-soft')}>
+        <span className={cx('relative grid place-items-center h-8 w-14 rounded-full transition', isActive && 'bg-brand-soft')}>
           <Icon size={22} strokeWidth={isActive ? 2.4 : 2} />
+          {badge > 0 && (
+            <span className="absolute -top-0.5 right-2.5 min-w-4.5 h-4.5 px-1 grid place-items-center rounded-full bg-brand text-brand-ink text-[10px] font-bold leading-none">
+              {badge > 99 ? '99+' : badge}
+            </span>
+          )}
         </span>
         {label}
       </>
@@ -26,7 +31,8 @@ const Item = ({ to, label, icon: Icon, end }) => (
 )
 
 export default function BottomNav() {
-  const { canEdit } = useStore()
+  const { canEdit, shoppingItems } = useStore()
+  const toBuy = shoppingItems.filter((i) => !i.checked).length
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 pb-safe bg-surface/90 backdrop-blur-xl border-t border-line">
@@ -44,8 +50,8 @@ export default function BottomNav() {
             </Link>
           </div>
         )}
+        <Item to="/shopping" label="Đi chợ" icon={ShoppingCart} badge={toBuy} />
         <Item to="/search" label="Tìm kiếm" icon={Search} />
-        <Item to="/account" label="Tài khoản" icon={UserRound} />
       </div>
     </nav>
   )

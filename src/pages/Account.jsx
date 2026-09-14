@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Cloud, Download, HardDrive, KeyRound, LoaderCircle, LogOut, RefreshCw, Smartphone, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import {
+  ChevronRight, Cloud, Download, HardDrive, KeyRound, LoaderCircle, LogOut, RefreshCw, Smartphone, Trash2, Upload,
+} from 'lucide-react'
 import { useStore } from '../store'
 import { useToast } from '../components/Toast'
 import { ConfirmSheet, PageHeader, Sheet } from '../components/ui'
@@ -7,12 +10,12 @@ import { canPromptInstall, isIOS, isStandalone, onInstallAvailable, promptInstal
 
 export default function Account() {
   const store = useStore()
-  const { isCloud, user, recipes, categories } = store
+  const { isCloud, user, recipes, categories, trash, cookLogs, pendingCount } = store
   const toast = useToast()
 
   return (
     <>
-      <PageHeader title="Tài khoản" />
+      <PageHeader back title="Tài khoản" />
       <div className="px-4 pt-2 space-y-4">
         {isCloud && user && <Profile />}
 
@@ -20,21 +23,33 @@ export default function Account() {
           <div className="grid place-items-center size-11 shrink-0 rounded-2xl bg-brand-soft text-brand">
             {isCloud ? <Cloud size={22} /> : <HardDrive size={22} />}
           </div>
-          <div>
+          <div className="flex-1">
             <p className="font-semibold">{isCloud ? 'Đồng bộ đám mây' : 'Lưu trên thiết bị này'}</p>
             <p className="text-sm text-muted mt-0.5">
               {isCloud
-                ? 'Công thức là của riêng tài khoản này, đăng nhập trên máy nào cũng thấy.'
+                ? 'Công thức là của riêng tài khoản này. Mất mạng vẫn xem và sửa được, có mạng lại tự đồng bộ.'
                 : 'Chưa cấu hình Supabase. Dữ liệu chỉ nằm trong trình duyệt này, hãy sao lưu thường xuyên.'}
             </p>
+            {pendingCount > 0 && (
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium">
+                <RefreshCw size={12} /> {pendingCount} thay đổi đang chờ đồng bộ
+              </p>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
           <Stat value={recipes.length} label="Món" />
           <Stat value={categories.length} label="Danh mục" />
-          <Stat value={recipes.filter((r) => r.is_favorite).length} label="Yêu thích" />
+          <Stat value={cookLogs.length} label="Lần nấu" />
         </div>
+
+        <Link to="/trash" className="card flex items-center gap-3 px-4 h-14 active:bg-surface-2">
+          <Trash2 size={20} className="text-muted" />
+          <span className="flex-1 font-medium">Thùng rác</span>
+          {trash.length > 0 && <span className="text-sm text-muted">{trash.length} món</span>}
+          <ChevronRight size={18} className="text-muted" />
+        </Link>
 
         <InstallCard />
 
@@ -64,7 +79,7 @@ const Stat = ({ value, label }) => (
 )
 
 function Profile() {
-  const { user, signOut, updatePassword } = useStore()
+  const { user, signOut, updatePassword, pendingCount } = useStore()
   const toast = useToast()
   const [confirmOut, setConfirmOut] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
@@ -137,7 +152,11 @@ function Profile() {
         onClose={() => setConfirmOut(false)}
         onConfirm={signOut}
         title="Đăng xuất?"
-        message="Công thức vẫn được lưu an toàn, đăng nhập lại là thấy."
+        message={
+          pendingCount > 0
+            ? `Còn ${pendingCount} thay đổi chưa đồng bộ. Chúng sẽ được gửi khi bạn đăng nhập lại trên máy này.`
+            : 'Công thức vẫn được lưu an toàn, đăng nhập lại là thấy.'
+        }
         confirmText="Đăng xuất"
         danger
       />
@@ -178,7 +197,7 @@ function Backup({ toast }) {
   const [busy, setBusy] = useState(false)
 
   const exportJson = () => {
-    const data = { version: 1, exported_at: new Date().toISOString(), categories, recipes }
+    const data = { version: 2, exported_at: new Date().toISOString(), categories, recipes }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -198,18 +217,17 @@ function Backup({ toast }) {
       if (!Array.isArray(data.recipes)) throw new Error('File không đúng định dạng')
 
       const idMap = {}
-      let maxOrder = Math.max(0, ...categories.map((c) => c.sort_order))
+      let order = Math.max(0, ...categories.map((c) => c.sort_order))
       for (const c of data.categories || []) {
         const existing = categories.find((x) => x.name.trim().toLowerCase() === c.name?.trim().toLowerCase())
-        idMap[c.id] = existing
-          ? existing.id
-          : (await saveCategory({ name: c.name, icon: c.icon, sort_order: ++maxOrder })).id
+        idMap[c.id] = existing ? existing.id : (await saveCategory({ name: c.name, icon: c.icon, sort_order: ++order })).id
       }
-      for (const r of [...data.recipes].reverse()) {
-        const { id, user_id, created_at, updated_at, ...rest } = r
+      const list = data.recipes.filter((r) => !r.deleted_at)
+      for (const r of [...list].reverse()) {
+        const { id, user_id, created_at, updated_at, share_id, deleted_at, author_name, ...rest } = r
         await saveRecipe({ ...rest, category_id: idMap[r.category_id] ?? null })
       }
-      toast(`Đã nhập ${data.recipes.length} món`)
+      toast(`Đã nhập ${list.length} món`)
     } catch (err) {
       toast(err.message || 'Nhập thất bại', 'error')
     } finally {
@@ -220,7 +238,7 @@ function Backup({ toast }) {
   return (
     <div className="card p-4">
       <p className="font-semibold">Sao lưu</p>
-      <p className="text-sm text-muted mt-0.5">Xuất công thức ra file JSON để lưu trữ hoặc gửi cho người khác nhập vào tài khoản của họ.</p>
+      <p className="text-sm text-muted mt-0.5">Xuất toàn bộ công thức ra file JSON để lưu trữ, hoặc nhập lại từ file.</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button className="btn-soft" onClick={exportJson}>
           <Download size={18} /> Xuất

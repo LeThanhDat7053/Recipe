@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowDown, ArrowUp, ClipboardPaste, Heading, ImagePlus, LoaderCircle, Plus, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Camera, ClipboardPaste, Heading, ImagePlus, Link2, LoaderCircle, Plus, Trash2, X } from 'lucide-react'
 import { useStore } from '../store'
 import { useToast } from '../components/Toast'
 import { ConfirmSheet, EmptyState, Sheet, Spinner, Stepper, useGoBack } from '../components/ui'
-import { cx, DIFFICULTY, uid } from '../lib/utils'
-
-const UNITS = 'kg|g|mg|ml|l|lít|muỗng canh|muỗng cà phê|muỗng|thìa|chén|bát|cốc|ly|quả|trái|củ|tép|cây|nhánh|lá|miếng|lát|con|gói|hộp|túi|lon|nắm|bó|chút|ít'
+import { cx, DIFFICULTY, parseIngredientLine, recipeImages, uid, UNITS } from '../lib/utils'
 
 const emptyItem = (type = 'item') => ({ id: uid(), type, amount: '', unit: '', name: '' })
-const emptyStep = () => ({ id: uid(), text: '' })
+const emptyStep = () => ({ id: uid(), text: '', image_url: null })
 
 export default function RecipeEdit() {
   const { id } = useParams()
@@ -31,48 +29,70 @@ export default function RecipeEdit() {
       </div>
     )
   }
-  if (!id) return <Editor />
+  if (!id) return loading ? <Spinner className="pt-40" /> : <Editor />
   const recipe = recipes.find((r) => r.id === id)
   if (!recipe) return loading ? <Spinner className="pt-40" /> : <EmptyState emoji="🥲" title="Không tìm thấy món này" />
   return <Editor key={recipe.id} original={recipe} />
 }
 
+function buildInitial(original, source, categoryId) {
+  if (original) {
+    return {
+      ...original,
+      prep_time: original.prep_time ?? '',
+      cook_time: original.cook_time ?? '',
+      ingredients: original.ingredients?.length ? original.ingredients : [emptyItem()],
+      steps: original.steps?.length ? original.steps : [emptyStep()],
+      tags: original.tags || [],
+    }
+  }
+  if (source) {
+    return {
+      title: `${source.title} (bản sao)`,
+      description: source.description || '',
+      category_id: source.category_id,
+      image_url: source.image_url,
+      prep_time: source.prep_time ?? '',
+      cook_time: source.cook_time ?? '',
+      servings: source.servings || 2,
+      difficulty: source.difficulty || 'easy',
+      ingredients: (source.ingredients || []).map((i) => ({ ...i, id: uid() })),
+      steps: (source.steps || []).map((s) => ({ ...s, id: uid() })),
+      notes: source.notes || '',
+      tags: [...(source.tags || [])],
+    }
+  }
+  return {
+    title: '',
+    description: '',
+    category_id: categoryId || null,
+    image_url: null,
+    prep_time: '',
+    cook_time: '',
+    servings: 2,
+    difficulty: 'easy',
+    ingredients: [emptyItem(), emptyItem(), emptyItem()],
+    steps: [emptyStep()],
+    notes: '',
+    tags: [],
+  }
+}
+
 function Editor({ original }) {
-  const { categories, saveRecipe, deleteRecipe, uploadImage, removeImage } = useStore()
+  const { recipes, categories, saveRecipe, trashRecipe, uploadImage, cleanupImages } = useStore()
   const toast = useToast()
   const navigate = useNavigate()
   const goBack = useGoBack(original ? `/recipe/${original.id}` : '/')
   const [params] = useSearchParams()
+  const source = !original && params.get('from') ? recipes.find((r) => r.id === params.get('from')) : null
 
-  const [initial] = useState(() =>
-    original
-      ? {
-          ...original,
-          ingredients: original.ingredients?.length ? original.ingredients : [emptyItem()],
-          steps: original.steps?.length ? original.steps : [emptyStep()],
-          tags: original.tags || [],
-        }
-      : {
-          title: '',
-          description: '',
-          category_id: params.get('category') || null,
-          image_url: null,
-          prep_time: '',
-          cook_time: '',
-          servings: 2,
-          difficulty: 'easy',
-          ingredients: [emptyItem(), emptyItem(), emptyItem()],
-          steps: [emptyStep()],
-          notes: '',
-          tags: [],
-          is_favorite: false,
-        },
-  )
+  const [initial] = useState(() => buildInitial(original, source, params.get('category')))
   const [form, setForm] = useState(initial)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [confirm, setConfirm] = useState(null) // 'leave' | 'delete'
+  const [uploading, setUploading] = useState(null) // 'main' | stepId
+  const [confirm, setConfirm] = useState(null) // 'leave' | 'trash'
   const [bulk, setBulk] = useState(null) // 'ing' | 'steps'
+  const [importOpen, setImportOpen] = useState(false)
   const uploaded = useRef([]) // ảnh upload trong phiên sửa này
   const focusId = useRef(null)
   const titleRef = useRef()
@@ -87,7 +107,6 @@ function Editor({ original }) {
     return () => window.removeEventListener('beforeunload', handler)
   }, [dirty])
 
-  // Focus ô vừa thêm
   useEffect(() => {
     if (!focusId.current) return
     document.getElementById(focusId.current)?.focus()
@@ -95,39 +114,53 @@ function Editor({ original }) {
   })
 
   /* ---------- Ảnh ---------- */
+  const upload = async (file, target, maxSize) => {
+    setUploading(target)
+    try {
+      const url = await uploadImage(file, maxSize)
+      uploaded.current.push(url)
+      return url
+    } catch (err) {
+      toast(err.message || 'Không tải ảnh lên được', 'error')
+      return null
+    } finally {
+      setUploading(null)
+    }
+  }
   const pickImage = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    setUploading(true)
-    try {
-      const url = await uploadImage(file)
-      uploaded.current.push(url)
-      set({ image_url: url })
-    } catch (err) {
-      toast(err.message || 'Không tải ảnh lên được', 'error')
-    } finally {
-      setUploading(false)
-    }
+    const url = await upload(file, 'main')
+    if (url) set({ image_url: url })
+  }
+  const pickStepImage = (stepId) => async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const url = await upload(file, stepId, 1080)
+    if (url) updateList('steps', stepId, { image_url: url })
   }
 
   /* ---------- Danh sách ---------- */
   const updateList = (key, itemId, patch) =>
-    set({ [key]: form[key].map((x) => (x.id === itemId ? { ...x, ...patch } : x)) })
-  const removeFromList = (key, itemId) => set({ [key]: form[key].filter((x) => x.id !== itemId) })
-  const insertAfter = (key, afterId, item) => {
-    const list = [...form[key]]
-    const idx = afterId ? list.findIndex((x) => x.id === afterId) : list.length - 1
-    list.splice(idx + 1, 0, item)
-    set({ [key]: list })
-  }
-  const move = (key, index, dir) => {
-    const list = [...form[key]]
-    const target = index + dir
-    if (target < 0 || target >= list.length) return
-    ;[list[index], list[target]] = [list[target], list[index]]
-    set({ [key]: list })
-  }
+    setForm((f) => ({ ...f, [key]: f[key].map((x) => (x.id === itemId ? { ...x, ...patch } : x)) }))
+  const removeFromList = (key, itemId) => setForm((f) => ({ ...f, [key]: f[key].filter((x) => x.id !== itemId) }))
+  const insertAfter = (key, afterId, item) =>
+    setForm((f) => {
+      const list = [...f[key]]
+      const idx = afterId ? list.findIndex((x) => x.id === afterId) : list.length - 1
+      list.splice(idx + 1, 0, item)
+      return { ...f, [key]: list }
+    })
+  const move = (key, index, dir) =>
+    setForm((f) => {
+      const list = [...f[key]]
+      const target = index + dir
+      if (target < 0 || target >= list.length) return f
+      ;[list[index], list[target]] = [list[target], list[index]]
+      return { ...f, [key]: list }
+    })
 
   const addIngredient = (afterId, type = 'item') => {
     const item = emptyItem(type)
@@ -143,21 +176,31 @@ function Editor({ original }) {
   const applyBulk = (text) => {
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
     if (bulk === 'ing') {
-      const re = new RegExp(`^([\\d.,/½¼¾ ]+)?\\s*(${UNITS})?\\s+(.+)$`, 'i')
-      const items = lines.map((line) => {
-        const clean = line.replace(/^[-•*]\s*/, '')
-        if (clean.endsWith(':')) return { ...emptyItem('group'), name: clean.slice(0, -1) }
-        const m = clean.match(re)
-        if (m && (m[1]?.trim() || m[2])) return { ...emptyItem(), amount: (m[1] || '').trim(), unit: m[2] || '', name: m[3] }
-        return { ...emptyItem(), name: clean }
-      })
-      const kept = form.ingredients.filter((i) => i.name.trim() || i.amount.trim())
-      set({ ingredients: [...kept, ...items] })
+      const items = lines.map(parseIngredientLine).filter(Boolean)
+      setForm((f) => ({ ...f, ingredients: [...f.ingredients.filter((i) => i.name.trim() || i.amount.trim()), ...items] }))
     } else {
-      const items = lines.map((l) => ({ ...emptyStep(), text: l.replace(/^(bước\s*)?\d+[.):\-]\s*/i, '') }))
-      set({ steps: [...form.steps.filter((s) => s.text.trim()), ...items] })
+      const items = lines.map((l) => ({ ...emptyStep(), text: l.replace(/^(bước\s*)?\d+[.):-]\s*/i, '') }))
+      setForm((f) => ({ ...f, steps: [...f.steps.filter((s) => s.text.trim() || s.image_url), ...items] }))
     }
     setBulk(null)
+  }
+
+  const applyImport = (d) => {
+    setForm((f) => ({
+      ...f,
+      title: d.title || f.title,
+      description: d.description || f.description,
+      image_url: d.image_url || f.image_url,
+      prep_time: d.prep_time ?? f.prep_time,
+      cook_time: d.cook_time ?? f.cook_time,
+      servings: d.servings || f.servings,
+      ingredients: d.ingredients?.length ? d.ingredients.map(parseIngredientLine).filter(Boolean) : f.ingredients,
+      steps: d.steps?.length ? d.steps.map((text) => ({ ...emptyStep(), text })) : f.steps,
+      tags: [...new Set([...f.tags, ...(d.tags || [])])],
+      notes: f.notes || (d.source_url ? `Nguồn: ${d.source_url}` : ''),
+    }))
+    setImportOpen(false)
+    toast(d.partial ? 'Trang này chỉ lấy được tên và ảnh, bạn nhập thêm phần còn lại nhé' : 'Đã nhập, kiểm tra lại rồi bấm Lưu')
   }
 
   /* ---------- Lưu / xoá / huỷ ---------- */
@@ -178,11 +221,11 @@ function Editor({ original }) {
         ingredients: form.ingredients
           .filter((i) => i.name.trim() || i.amount.trim())
           .map((i) => ({ ...i, name: i.name.trim(), amount: i.amount.trim(), unit: i.unit.trim() })),
-        steps: form.steps.filter((s) => s.text.trim()).map((s) => ({ ...s, text: s.text.trim() })),
+        steps: form.steps
+          .filter((s) => s.text.trim() || s.image_url)
+          .map((s) => ({ ...s, text: s.text.trim() })),
       })
-      // Dọn ảnh không còn dùng
-      const unused = [...uploaded.current, original?.image_url].filter((u) => u && u !== saved.image_url)
-      unused.forEach(removeImage)
+      cleanupImages([...uploaded.current, ...(original ? recipeImages(original) : [])], { excludeIds: [saved.id], include: [saved] })
       toast('Đã lưu công thức')
       navigate(`/recipe/${saved.id}`, { replace: true })
     } catch (err) {
@@ -192,15 +235,16 @@ function Editor({ original }) {
   }
 
   const leave = () => {
-    uploaded.current.forEach(removeImage)
+    cleanupImages(uploaded.current)
     goBack()
   }
 
-  const remove = async () => {
+  const trash = async () => {
     setSaving(true)
     try {
-      await deleteRecipe(original)
-      toast('Đã xoá công thức')
+      await trashRecipe(original)
+      cleanupImages(uploaded.current)
+      toast('Đã chuyển vào thùng rác')
       navigate('/', { replace: true })
     } catch (err) {
       toast(err.message, 'error')
@@ -208,22 +252,35 @@ function Editor({ original }) {
     }
   }
 
+  const busy = saving || !!uploading
+
   return (
     <div className="pb-[calc(2rem+env(safe-area-inset-bottom))]">
-      {/* Header */}
       <header className="sticky top-0 z-30 pt-safe bg-bg/85 backdrop-blur-xl border-b border-line">
         <div className="flex items-center gap-2 h-14 px-2">
           <button onClick={() => (dirty ? setConfirm('leave') : leave())} className="icon-btn" aria-label="Huỷ">
             <X size={24} />
           </button>
-          <h1 className="flex-1 text-lg font-bold truncate">{original ? 'Sửa công thức' : 'Món mới'}</h1>
-          <button onClick={save} disabled={saving || uploading} className="btn-primary h-10 px-5 rounded-full">
+          <h1 className="flex-1 text-lg font-bold truncate">{original ? 'Sửa công thức' : source ? 'Nhân bản món' : 'Món mới'}</h1>
+          <button onClick={save} disabled={busy} className="btn-primary h-10 px-5 rounded-full">
             {saving ? <LoaderCircle size={18} className="animate-spin" /> : 'Lưu'}
           </button>
         </div>
       </header>
 
       <div className="px-4 pt-4 space-y-8">
+        {!original && !source && (
+          <button onClick={() => setImportOpen(true)} className="card w-full flex items-center gap-3 p-3 text-left active:scale-[0.99] transition">
+            <span className="grid place-items-center size-11 shrink-0 rounded-2xl bg-brand-soft text-brand">
+              <Link2 size={22} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Nhập từ link</span>
+              <span className="block text-sm text-muted truncate">Dán link bài công thức trên web để tự điền</span>
+            </span>
+          </button>
+        )}
+
         {/* Ảnh */}
         <section>
           <label
@@ -232,7 +289,7 @@ function Editor({ original }) {
               form.image_url ? 'bg-surface-2' : 'border-2 border-dashed border-line text-muted',
             )}
           >
-            <input type="file" accept="image/*" className="sr-only" onChange={pickImage} disabled={uploading} />
+            <input type="file" accept="image/*" className="sr-only" onChange={pickImage} disabled={!!uploading} />
             {form.image_url ? (
               <img src={form.image_url} alt="" className="absolute inset-0 size-full object-cover" />
             ) : (
@@ -241,12 +298,12 @@ function Editor({ original }) {
                 <span className="text-sm font-medium">Thêm ảnh món ăn</span>
               </>
             )}
-            {uploading && (
+            {uploading === 'main' && (
               <div className="absolute inset-0 grid place-items-center bg-black/40 text-white">
                 <LoaderCircle size={32} className="animate-spin" />
               </div>
             )}
-            {form.image_url && !uploading && (
+            {form.image_url && uploading !== 'main' && (
               <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/50 backdrop-blur px-3 py-1.5 text-sm font-medium text-white">
                 <ImagePlus size={16} /> Đổi ảnh
               </span>
@@ -270,7 +327,6 @@ function Editor({ original }) {
               placeholder="VD: Thịt kho tàu"
               value={form.title}
               onChange={(e) => set({ title: e.target.value })}
-              autoFocus={!original}
               enterKeyHint="next"
             />
           </div>
@@ -286,12 +342,7 @@ function Editor({ original }) {
                 Không
               </button>
               {categories.map((c) => (
-                <button
-                  type="button"
-                  key={c.id}
-                  onClick={() => set({ category_id: c.id })}
-                  className={cx('chip', form.category_id === c.id && 'chip-active')}
-                >
+                <button type="button" key={c.id} onClick={() => set({ category_id: c.id })} className={cx('chip', form.category_id === c.id && 'chip-active')}>
                   {c.icon} {c.name}
                 </button>
               ))}
@@ -319,10 +370,7 @@ function Editor({ original }) {
                   type="button"
                   key={key}
                   onClick={() => set({ difficulty: key })}
-                  className={cx(
-                    'flex-1 h-10 rounded-xl text-sm font-semibold transition',
-                    form.difficulty === key ? 'bg-surface shadow-sm text-ink' : 'text-muted',
-                  )}
+                  className={cx('flex-1 h-10 rounded-xl text-sm font-semibold transition', form.difficulty === key ? 'bg-surface shadow-sm text-ink' : 'text-muted')}
                 >
                   {d.label}
                 </button>
@@ -348,7 +396,12 @@ function Editor({ original }) {
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addIngredient(ing.id))}
                     enterKeyHint="next"
                   />
-                  <RowActions onUp={() => move('ingredients', index, -1)} onRemove={() => removeFromList('ingredients', ing.id)} />
+                  <button type="button" onClick={() => move('ingredients', index, -1)} className="icon-btn size-10 text-muted" aria-label="Lên">
+                    <ArrowUp size={18} />
+                  </button>
+                  <button type="button" onClick={() => removeFromList('ingredients', ing.id)} className="icon-btn size-10 text-muted active:text-danger" aria-label="Xoá">
+                    <Trash2 size={18} />
+                  </button>
                 </li>
               ) : (
                 <li key={ing.id} className="flex items-center gap-1.5">
@@ -378,12 +431,7 @@ function Editor({ original }) {
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addIngredient(ing.id))}
                     enterKeyHint="next"
                   />
-                  <button
-                    type="button"
-                    onClick={() => removeFromList('ingredients', ing.id)}
-                    className="icon-btn size-10 text-muted active:text-danger"
-                    aria-label="Xoá"
-                  >
+                  <button type="button" onClick={() => removeFromList('ingredients', ing.id)} className="icon-btn size-10 text-muted active:text-danger" aria-label="Xoá">
                     <Trash2 size={18} />
                   </button>
                 </li>
@@ -391,7 +439,7 @@ function Editor({ original }) {
             )}
           </ul>
           <datalist id="units">
-            {UNITS.split('|').map((u) => (
+            {UNITS.map((u) => (
               <option key={u} value={u} />
             ))}
           </datalist>
@@ -411,9 +459,13 @@ function Editor({ original }) {
           <ol className="space-y-3">
             {form.steps.map((step, index) => (
               <li key={step.id} className="card p-3">
-                <div className="flex items-center gap-1 mb-2">
+                <div className="flex items-center gap-0.5 mb-2">
                   <span className="grid place-items-center size-7 rounded-full bg-brand-soft text-brand text-sm font-bold">{index + 1}</span>
-                  <span className="flex-1 ml-1 text-sm font-medium text-muted">Bước {index + 1}</span>
+                  <span className="flex-1 ml-2 text-sm font-medium text-muted">Bước {index + 1}</span>
+                  <label className="icon-btn size-9 text-muted cursor-pointer" aria-label="Thêm ảnh cho bước">
+                    <input type="file" accept="image/*" className="sr-only" onChange={pickStepImage(step.id)} disabled={!!uploading} />
+                    {uploading === step.id ? <LoaderCircle size={18} className="animate-spin" /> : <Camera size={18} />}
+                  </label>
                   <button type="button" className="icon-btn size-9 text-muted disabled:opacity-30" disabled={index === 0} onClick={() => move('steps', index, -1)} aria-label="Lên">
                     <ArrowUp size={18} />
                   </button>
@@ -433,11 +485,24 @@ function Editor({ original }) {
                 <AutoTextarea
                   id={`step-${step.id}`}
                   className="border-0 bg-surface-2 focus:ring-0"
-                  placeholder="Mô tả bước này…"
+                  placeholder="Mô tả bước này… (VD: luộc 10 phút → sẽ có nút hẹn giờ)"
                   value={step.text}
                   onChange={(v) => updateList('steps', step.id, { text: v })}
                   rows={2}
                 />
+                {step.image_url && (
+                  <div className="relative mt-2">
+                    <img src={step.image_url} alt="" className="w-full max-h-56 object-cover rounded-2xl" />
+                    <button
+                      type="button"
+                      onClick={() => updateList('steps', step.id, { image_url: null })}
+                      className="absolute top-2 right-2 icon-btn size-9 bg-black/50 text-white"
+                      aria-label="Xoá ảnh bước"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ol>
@@ -455,13 +520,13 @@ function Editor({ original }) {
           <TagInput tags={form.tags} onChange={(tags) => set({ tags })} />
         </section>
 
-        <button onClick={save} disabled={saving || uploading} className="btn-primary w-full h-14 text-base">
+        <button onClick={save} disabled={busy} className="btn-primary w-full h-14 text-base">
           {saving ? <LoaderCircle size={20} className="animate-spin" /> : 'Lưu công thức'}
         </button>
 
         {original && (
-          <button onClick={() => setConfirm('delete')} className="btn-danger w-full">
-            <Trash2 size={18} /> Xoá công thức này
+          <button onClick={() => setConfirm('trash')} className="btn-danger w-full">
+            <Trash2 size={18} /> Chuyển vào thùng rác
           </button>
         )}
       </div>
@@ -476,16 +541,17 @@ function Editor({ original }) {
         confirmText="Bỏ"
       />
       <ConfirmSheet
-        open={confirm === 'delete'}
+        open={confirm === 'trash'}
         onClose={() => setConfirm(null)}
-        onConfirm={remove}
+        onConfirm={trash}
         busy={saving}
         danger
-        title={`Xoá "${original?.title}"?`}
-        message="Không thể hoàn tác sau khi xoá."
-        confirmText="Xoá"
+        title={`Chuyển "${original?.title}" vào thùng rác?`}
+        message="Có thể khôi phục trong 30 ngày."
+        confirmText="Chuyển"
       />
       <BulkSheet mode={bulk} onClose={() => setBulk(null)} onApply={applyBulk} />
+      <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} onImported={applyImport} />
     </div>
   )
 }
@@ -498,19 +564,6 @@ function SectionHeader({ title, onBulk }) {
         <ClipboardPaste size={16} /> Nhập nhanh
       </button>
     </div>
-  )
-}
-
-function RowActions({ onUp, onRemove }) {
-  return (
-    <>
-      <button type="button" onClick={onUp} className="icon-btn size-10 text-muted" aria-label="Lên">
-        <ArrowUp size={18} />
-      </button>
-      <button type="button" onClick={onRemove} className="icon-btn size-10 text-muted active:text-danger" aria-label="Xoá">
-        <Trash2 size={18} />
-      </button>
-    </>
   )
 }
 
@@ -546,8 +599,8 @@ function MinutesInput({ label, value, onChange }) {
 
 function TagInput({ tags, onChange }) {
   const [text, setText] = useState('')
-  const add = () => {
-    const t = text.trim().replace(/^#/, '').toLowerCase()
+  const add = (raw = text) => {
+    const t = raw.trim().replace(/^#/, '').toLowerCase()
     if (t && !tags.includes(t)) onChange([...tags, t])
     setText('')
   }
@@ -573,9 +626,9 @@ function TagInput({ tags, onChange }) {
         className="input"
         placeholder="Gõ tag rồi nhấn Enter (VD: ăn kiêng)"
         value={text}
-        onChange={(e) => (e.target.value.endsWith(',') ? (setText(e.target.value.slice(0, -1)), setTimeout(add)) : setText(e.target.value))}
+        onChange={(e) => (e.target.value.endsWith(',') ? add(e.target.value.slice(0, -1)) : setText(e.target.value))}
         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-        onBlur={add}
+        onBlur={() => add()}
         enterKeyHint="done"
       />
     </div>
@@ -615,6 +668,83 @@ function BulkSheet({ mode, onClose, onApply }) {
         onChange={(e) => setText(e.target.value)}
         placeholder={isIng ? '500 g thịt ba chỉ\n3 tép tỏi\nGia vị:\n2 muỗng nước mắm' : '1. Sơ chế thịt\n2. Ướp gia vị 30 phút\n3. Kho lửa nhỏ'}
       />
+    </Sheet>
+  )
+}
+
+function ImportSheet({ open, onClose, onImported }) {
+  const { importFromUrl } = useStore()
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setUrl('')
+      setError('')
+    }
+  }, [open])
+
+  const paste = async () => {
+    try {
+      setUrl((await navigator.clipboard.readText()).trim())
+    } catch {
+      setError('Không đọc được bộ nhớ tạm, hãy dán thủ công')
+    }
+  }
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const link = url.trim()
+    if (!/^https?:\/\//i.test(link)) return setError('Link phải bắt đầu bằng http:// hoặc https://')
+    setBusy(true)
+    setError('')
+    try {
+      onImported(await importFromUrl(link))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Nhập từ link"
+      footer={
+        <button form="import-form" className="btn-primary w-full" disabled={busy || !url.trim()}>
+          {busy ? (
+            <>
+              <LoaderCircle size={20} className="animate-spin" /> Đang đọc trang…
+            </>
+          ) : (
+            'Lấy công thức'
+          )}
+        </button>
+      }
+    >
+      <form id="import-form" onSubmit={submit} className="pt-2 space-y-3">
+        <p className="text-sm text-muted">Hỗ trợ đa số web nấu ăn (Cooky, Điện Máy Xanh, AllRecipes…). Blog cá nhân có thể chỉ lấy được tên và ảnh.</p>
+        <div className="flex gap-2">
+          <input
+            className="input"
+            type="url"
+            inputMode="url"
+            placeholder="https://…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            autoFocus
+          />
+          {navigator.clipboard?.readText && (
+            <button type="button" onClick={paste} className="btn-soft px-3 shrink-0" aria-label="Dán">
+              <ClipboardPaste size={20} />
+            </button>
+          )}
+        </div>
+        {error && <p className="rounded-2xl bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>}
+      </form>
     </Sheet>
   )
 }

@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import { createSeed } from './seed'
 import { blobToDataURL, compressImage, uid } from './utils'
 
 // Chỉ giữ phần gốc https://xxx.supabase.co (lỡ dán kèm /rest/v1/ vẫn chạy)
@@ -10,146 +9,100 @@ const BUCKET = 'recipe-images'
 export const supabase = URL_ && KEY ? createClient(URL_, KEY) : null
 export const isCloud = !!supabase
 
-const RECIPE_FIELDS = [
-  'id', 'title', 'description', 'category_id', 'image_url', 'prep_time', 'cook_time',
-  'servings', 'difficulty', 'ingredients', 'steps', 'notes', 'tags', 'is_favorite',
-]
-const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]))
+/** Các bảng và cột được phép ghi */
+export const TABLES = {
+  categories: ['id', 'name', 'icon', 'sort_order'],
+  recipes: [
+    'id', 'title', 'description', 'category_id', 'image_url', 'prep_time', 'cook_time', 'servings', 'difficulty',
+    'ingredients', 'steps', 'notes', 'tags', 'is_favorite', 'rating', 'share_id', 'deleted_at', 'created_at', 'updated_at',
+  ],
+  cook_logs: ['id', 'recipe_id', 'cooked_at', 'note'],
+  collections: ['id', 'name', 'icon', 'recipe_ids', 'sort_order', 'created_at'],
+  shopping_items: ['id', 'name', 'amount', 'unit', 'checked', 'recipe_title', 'sort_order', 'created_at'],
+}
+export const TABLE_NAMES = Object.keys(TABLES)
+export const emptyDb = () => Object.fromEntries(TABLE_NAMES.map((t) => [t, []]))
 
-const sortCategories = (list) => [...list].sort((a, b) => a.sort_order - b.sort_order)
+const pick = (table, row) => Object.fromEntries(TABLES[table].filter((k) => k in row).map((k) => [k, row[k]]))
+
+export const isNetworkError = (e) =>
+  (typeof navigator !== 'undefined' && !navigator.onLine) ||
+  /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(e?.message || String(e))
 
 /* ------------------------------------------------------------------ */
-/* Chế độ cloud: Supabase                                              */
+/* Dữ liệu (chỉ dùng ở chế độ cloud; chế độ local lưu thẳng trong store) */
 /* ------------------------------------------------------------------ */
-const cloud = {
-  async fetchAll() {
-    const [c, r] = await Promise.all([
-      supabase.from('categories').select('*').order('sort_order'),
-      supabase.from('recipes').select('*').order('created_at', { ascending: false }),
-    ])
-    if (c.error) throw c.error
-    if (r.error) throw r.error
-    return { categories: c.data, recipes: r.data }
-  },
-  async saveRecipe(recipe) {
-    const { data, error } = await supabase
-      .from('recipes')
-      .upsert(pick(recipe, RECIPE_FIELDS))
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  },
-  async deleteRecipe(recipe) {
-    const { error } = await supabase.from('recipes').delete().eq('id', recipe.id)
-    if (error) throw error
-    await cloud.removeImage(recipe.image_url)
-  },
-  async saveCategory(cat) {
-    const { data, error } = await supabase
-      .from('categories')
-      .upsert(pick(cat, ['id', 'name', 'icon', 'sort_order']))
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  },
-  async deleteCategory(id) {
-    const { error } = await supabase.from('categories').delete().eq('id', id)
-    if (error) throw error
-  },
-  async uploadImage(file) {
-    const blob = await compressImage(file)
-    const ext = blob.type === 'image/webp' ? 'webp' : 'jpg'
-    const { data: auth } = await supabase.auth.getSession()
-    if (!auth.session) throw new Error('Phiên đăng nhập đã hết, hãy đăng nhập lại')
-    const path = `${auth.session.user.id}/${uid()}.${ext}`
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, blob, { contentType: blob.type, cacheControl: '31536000' })
-    if (error) throw error
-    return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
-  },
-  async removeImage(url) {
-    const marker = `/object/public/${BUCKET}/`
-    if (!url || !url.includes(marker)) return
-    await supabase.storage.from(BUCKET).remove([url.split(marker)[1]]).catch(() => {})
-  },
+export async function fetchAll() {
+  const results = await Promise.all(TABLE_NAMES.map((t) => supabase.from(t).select('*').range(0, 4999)))
+  const db = {}
+  results.forEach((res, i) => {
+    if (res.error) throw res.error
+    db[TABLE_NAMES[i]] = res.data
+  })
+  return db
 }
 
-/* ------------------------------------------------------------------ */
-/* Chế độ local: lưu trong localStorage (khi chưa cấu hình Supabase)   */
-/* ------------------------------------------------------------------ */
-const LOCAL_KEY = 'recipebook:local:v1'
-
-const readLocal = () => {
-  try {
-    const raw = localStorage.getItem(LOCAL_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
-  const seed = createSeed()
-  writeLocal(seed)
-  return seed
-}
-function writeLocal(db) {
-  try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(db))
-  } catch {
-    throw new Error('Bộ nhớ trình duyệt đã đầy. Hãy xoá bớt ảnh hoặc chuyển sang Supabase.')
+/** op: { type: 'upsert', table, rows } | { type: 'remove', table, ids } */
+export async function exec(op) {
+  if (op.type === 'upsert') {
+    const { error } = await supabase.from(op.table).upsert(op.rows.map((r) => pick(op.table, r)))
+    if (error) throw error
+  } else {
+    const { error } = await supabase.from(op.table).delete().in('id', op.ids)
+    if (error) throw error
   }
 }
 
-const local = {
-  async fetchAll() {
-    const db = readLocal()
-    return {
-      categories: sortCategories(db.categories),
-      recipes: [...db.recipes].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    }
-  },
-  async saveRecipe(recipe) {
-    const db = readLocal()
-    const now = new Date().toISOString()
-    const idx = db.recipes.findIndex((r) => r.id === recipe.id)
-    const saved = {
-      ...pick(recipe, RECIPE_FIELDS),
-      id: recipe.id || uid(),
-      created_at: idx >= 0 ? db.recipes[idx].created_at : now,
-      updated_at: now,
-    }
-    if (idx >= 0) db.recipes[idx] = saved
-    else db.recipes.unshift(saved)
-    writeLocal(db)
-    return saved
-  },
-  async deleteRecipe(recipe) {
-    const db = readLocal()
-    db.recipes = db.recipes.filter((r) => r.id !== recipe.id)
-    writeLocal(db)
-  },
-  async saveCategory(cat) {
-    const db = readLocal()
-    const saved = { ...pick(cat, ['id', 'name', 'icon', 'sort_order']), id: cat.id || uid() }
-    const idx = db.categories.findIndex((c) => c.id === saved.id)
-    if (idx >= 0) db.categories[idx] = saved
-    else db.categories.push(saved)
-    writeLocal(db)
-    return saved
-  },
-  async deleteCategory(id) {
-    const db = readLocal()
-    db.categories = db.categories.filter((c) => c.id !== id)
-    db.recipes = db.recipes.map((r) => (r.category_id === id ? { ...r, category_id: null } : r))
-    writeLocal(db)
-  },
-  async uploadImage(file) {
-    // Ảnh nhỏ hơn để vừa localStorage (~5MB)
-    return blobToDataURL(await compressImage(file, 800, 0.72))
-  },
-  async removeImage() {},
+export async function uploadImage(file, maxSize = 1280) {
+  if (!supabase) return blobToDataURL(await compressImage(file, Math.min(maxSize, 800), 0.72))
+  const blob = await compressImage(file, maxSize)
+  const ext = blob.type === 'image/webp' ? 'webp' : 'jpg'
+  const { data: auth } = await supabase.auth.getSession()
+  if (!auth.session) throw new Error('Phiên đăng nhập đã hết, hãy đăng nhập lại')
+  const path = `${auth.session.user.id}/${uid()}.${ext}`
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, blob, { contentType: blob.type, cacheControl: '31536000' })
+  if (error) throw new Error(isNetworkError(error) ? 'Cần có mạng để tải ảnh lên' : error.message)
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
 }
 
-export const api = isCloud ? cloud : local
+export async function removeImages(urls) {
+  const marker = `/object/public/${BUCKET}/`
+  const paths = urls.filter((u) => u?.includes(marker)).map((u) => u.split(marker)[1])
+  if (!supabase || !paths.length) return
+  await supabase.storage.from(BUCKET).remove(paths).catch(() => {})
+}
+
+export async function getSharedRecipe(shareId) {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('get_shared_recipe', { p_share_id: shareId })
+  if (error) {
+    if (/invalid input syntax/i.test(error.message)) return null
+    throw new Error(isNetworkError(error) ? 'Không có kết nối mạng' : error.message)
+  }
+  return data
+}
+
+export async function importFromUrl(link) {
+  const headers = {}
+  if (supabase) {
+    const { data } = await supabase.auth.getSession()
+    if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`
+  }
+  let res
+  try {
+    res = await fetch(`/.netlify/functions/import-recipe?url=${encodeURIComponent(link)}`, { headers })
+  } catch {
+    throw new Error('Không có kết nối mạng')
+  }
+  if (!(res.headers.get('content-type') || '').includes('json')) {
+    throw new Error('Tính năng này chỉ chạy trên bản đã deploy lên Netlify (hoặc khi chạy "netlify dev").')
+  }
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || 'Không đọc được trang này')
+  return body
+}
 
 /* ------------------------------------------------------------------ */
 /* Xác thực                                                            */
@@ -177,7 +130,6 @@ export const auth = {
       options: { data: { full_name: name }, emailRedirectTo: window.location.origin },
     })
     if (error) throw translateAuthError(error)
-    // Email đã tồn tại: Supabase trả user không có identity
     if (data.user && data.user.identities?.length === 0) throw new Error('Email này đã có tài khoản')
     return !data.session
   },

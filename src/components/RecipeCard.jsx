@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Link } from 'react-router-dom'
-import { Clock, Heart } from 'lucide-react'
+import { Clock, Heart, Star } from 'lucide-react'
 import { useStore } from '../store'
 import { cx, formatMinutes, totalTime } from '../lib/utils'
 
@@ -26,30 +26,20 @@ export function RecipeImage({ recipe, emoji, className, eager }) {
     )
   }
   return (
-    <div
-      className={cx(
-        'grid place-items-center bg-gradient-to-br',
-        GRADIENTS[hash(recipe.id) % GRADIENTS.length],
-        className,
-      )}
-    >
+    <div className={cx('grid place-items-center bg-gradient-to-br', GRADIENTS[hash(recipe.id) % GRADIENTS.length], className)}>
       <span className="text-[2.5em] drop-shadow-sm">{emoji || '🍽️'}</span>
     </div>
   )
 }
 
-function Tile({ recipe }) {
+function Tile({ recipe, caption }) {
   const { categoryMap } = useStore()
   const cat = categoryMap[recipe.category_id]
   const time = totalTime(recipe)
   return (
-    <Link to={`/recipe/${recipe.id}`} className="block group active:scale-[0.98] transition">
+    <Link to={`/recipe/${recipe.id}`} className="block active:scale-[0.98] transition">
       <div className="relative">
-        <RecipeImage
-          recipe={recipe}
-          emoji={cat?.icon}
-          className="w-full aspect-[4/5] rounded-3xl text-2xl"
-        />
+        <RecipeImage recipe={recipe} emoji={cat?.icon} className="w-full aspect-[4/5] rounded-3xl text-2xl" />
         {recipe.is_favorite && (
           <span className="absolute top-2 right-2 grid place-items-center size-8 rounded-full bg-black/30 backdrop-blur text-white">
             <Heart size={16} fill="currentColor" />
@@ -57,24 +47,25 @@ function Tile({ recipe }) {
         )}
       </div>
       <p className="mt-2 font-semibold leading-snug line-clamp-2">{recipe.title}</p>
-      {time > 0 && (
-        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted">
-          <Clock size={12} /> {formatMinutes(time)}
-        </p>
+      {caption ? (
+        <p className="mt-0.5 text-xs text-muted">{caption}</p>
+      ) : (
+        time > 0 && (
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted">
+            <Clock size={12} /> {formatMinutes(time)}
+          </p>
+        )
       )}
     </Link>
   )
 }
 
-function Row({ recipe }) {
+function Row({ recipe, extra, right, link = true }) {
   const { categoryMap } = useStore()
   const cat = categoryMap[recipe.category_id]
   const time = totalTime(recipe)
-  return (
-    <Link
-      to={`/recipe/${recipe.id}`}
-      className="flex items-center gap-3 p-2 pr-3 rounded-3xl active:bg-surface-2 transition"
-    >
+  const content = (
+    <>
       <RecipeImage recipe={recipe} emoji={cat?.icon} className="size-20 shrink-0 rounded-2xl text-sm" />
       <div className="flex-1 min-w-0">
         <p className="font-semibold leading-snug line-clamp-2">{recipe.title}</p>
@@ -89,10 +80,24 @@ function Row({ recipe }) {
               <Clock size={12} /> {formatMinutes(time)}
             </span>
           )}
+          {recipe.rating > 0 && (
+            <span className="flex items-center gap-0.5 shrink-0">
+              <Star size={12} className="text-amber-400" fill="currentColor" /> {recipe.rating}
+            </span>
+          )}
         </div>
+        {extra && <div className="mt-1 text-xs">{extra}</div>}
       </div>
-      {recipe.is_favorite && <Heart size={18} className="shrink-0 text-brand" fill="currentColor" />}
+      {right ?? (recipe.is_favorite && <Heart size={18} className="shrink-0 text-brand" fill="currentColor" />)}
+    </>
+  )
+  const cls = 'flex items-center gap-3 p-2 pr-3 rounded-3xl transition'
+  return link ? (
+    <Link to={`/recipe/${recipe.id}`} className={cx(cls, 'active:bg-surface-2')}>
+      {content}
     </Link>
+  ) : (
+    <div className={cls}>{content}</div>
   )
 }
 

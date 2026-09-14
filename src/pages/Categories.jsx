@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Pencil, Plus } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronRight, Pencil, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { useToast } from '../components/Toast'
-import { ConfirmSheet, PageHeader, Sheet } from '../components/ui'
-
-const EMOJIS = ['🍖', '🍗', '🥩', '🐟', '🦐', '🍲', '🍜', '🥘', '🍳', '🥗', '🥦', '🍚', '🍞', '🍝', '🍰', '🍮', '🍪', '🧋', '☕', '🍹', '🥤', '🌶️', '🥟', '🍱']
+import { CollectionFormSheet } from '../components/RecipeSheets'
+import { ConfirmSheet, EmojiGrid, PageHeader, Sheet } from '../components/ui'
 
 export default function Categories() {
-  const { categories, recipes, canEdit } = useStore()
+  const { categories, collections, recipes, canEdit } = useStore()
   const [manage, setManage] = useState(false)
+  const [newCollection, setNewCollection] = useState(false)
 
   const counts = useMemo(() => {
     const map = { favorites: 0, none: 0 }
@@ -19,6 +19,7 @@ export default function Categories() {
     })
     return map
   }, [recipes])
+  const activeIds = useMemo(() => new Set(recipes.map((r) => r.id)), [recipes])
 
   return (
     <>
@@ -38,21 +39,46 @@ export default function Categories() {
         {categories.map((c) => (
           <CategoryCard key={c.id} to={`/categories/${c.id}`} icon={c.icon} name={c.name} count={counts[c.id] || 0} />
         ))}
-        {counts.none > 0 && (
-          <CategoryCard to="/categories/none" icon="📦" name="Chưa phân loại" count={counts.none} />
-        )}
-        {canEdit && (
-          <button
-            onClick={() => setManage(true)}
-            className="flex flex-col items-center justify-center gap-2 min-h-32 rounded-3xl border-2 border-dashed border-line text-muted active:scale-[0.97] transition"
-          >
-            <Plus size={24} />
-            <span className="text-sm font-medium">Thêm danh mục</span>
-          </button>
-        )}
+        {counts.none > 0 && <CategoryCard to="/categories/none" icon="📦" name="Chưa phân loại" count={counts.none} />}
       </div>
 
+      <section className="px-4 pt-8">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="section-title">Bộ sưu tập</h2>
+          {canEdit && (
+            <button onClick={() => setNewCollection(true)} className="flex items-center gap-1 text-sm font-medium text-brand p-1">
+              <Plus size={16} /> Tạo mới
+            </button>
+          )}
+        </div>
+        {collections.length === 0 ? (
+          <button
+            onClick={() => canEdit && setNewCollection(true)}
+            className="w-full rounded-3xl border-2 border-dashed border-line p-5 text-left text-muted active:scale-[0.99] transition"
+          >
+            <p className="font-medium text-ink">Gom món theo dịp 🎉</p>
+            <p className="text-sm mt-0.5">VD: "Mâm cỗ Tết", "Món cho bé", "Ăn kiêng". Một món có thể nằm trong nhiều bộ.</p>
+          </button>
+        ) : (
+          <ul className="card divide-y divide-line overflow-hidden">
+            {collections.map((c) => (
+              <li key={c.id}>
+                <Link to={`/collections/${c.id}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-2">
+                  <span className="text-2xl w-8 text-center">{c.icon}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-medium truncate">{c.name}</span>
+                    <span className="block text-xs text-muted">{(c.recipe_ids || []).filter((id) => activeIds.has(id)).length} món</span>
+                  </span>
+                  <ChevronRight size={18} className="text-muted" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <CategoryManager open={manage} onClose={() => setManage(false)} />
+      <CollectionFormSheet open={newCollection} onClose={() => setNewCollection(false)} />
     </>
   )
 }
@@ -75,9 +101,9 @@ function CategoryCard({ to, icon, name, count, highlight }) {
 }
 
 function CategoryManager({ open, onClose }) {
-  const { categories, saveCategory, deleteCategory } = useStore()
+  const { categories, saveCategory, saveCategories, deleteCategory } = useStore()
   const toast = useToast()
-  const [editing, setEditing] = useState(null) // null | {id?, name, icon}
+  const [editing, setEditing] = useState(null) // null | { id?, name, icon }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -85,10 +111,12 @@ function CategoryManager({ open, onClose }) {
     const a = categories[index]
     const b = categories[index + dir]
     if (!a || !b) return
+    const orderA = b.sort_order
+    const orderB = a.sort_order === b.sort_order ? a.sort_order + dir : a.sort_order
     try {
-      await Promise.all([
-        saveCategory({ ...a, sort_order: b.sort_order }),
-        saveCategory({ ...b, sort_order: a.sort_order === b.sort_order ? a.sort_order + dir : a.sort_order }),
+      await saveCategories([
+        { ...a, sort_order: orderA },
+        { ...b, sort_order: orderB },
       ])
     } catch (e) {
       toast(e.message, 'error')
@@ -100,13 +128,7 @@ function CategoryManager({ open, onClose }) {
     if (!editing.name.trim()) return
     setBusy(true)
     try {
-      const maxOrder = Math.max(0, ...categories.map((c) => c.sort_order))
-      await saveCategory({
-        sort_order: maxOrder + 1,
-        ...editing,
-        name: editing.name.trim(),
-        icon: editing.icon || '🍽️',
-      })
+      await saveCategory({ ...editing, name: editing.name.trim() })
       toast(editing.id ? 'Đã cập nhật danh mục' : 'Đã thêm danh mục')
       setEditing(null)
     } catch (err) {
@@ -134,7 +156,7 @@ function CategoryManager({ open, onClose }) {
     return (
       <>
         <Sheet
-          open={open}
+          open={open && !confirmDelete}
           onClose={() => setEditing(null)}
           title={editing.id ? 'Sửa danh mục' : 'Danh mục mới'}
           footer={
@@ -152,9 +174,7 @@ function CategoryManager({ open, onClose }) {
         >
           <form id="cat-form" onSubmit={save} className="pt-3 space-y-4">
             <div className="flex gap-3">
-              <div className="grid place-items-center size-12 shrink-0 rounded-2xl bg-surface-2 text-3xl">
-                {editing.icon || '🍽️'}
-              </div>
+              <div className="grid place-items-center size-12 shrink-0 rounded-2xl bg-surface-2 text-3xl">{editing.icon || '🍽️'}</div>
               <input
                 className="input"
                 placeholder="Tên danh mục"
@@ -166,26 +186,7 @@ function CategoryManager({ open, onClose }) {
             </div>
             <div>
               <p className="label">Biểu tượng</p>
-              <div className="grid grid-cols-8 gap-1.5">
-                {EMOJIS.map((em) => (
-                  <button
-                    type="button"
-                    key={em}
-                    onClick={() => setEditing({ ...editing, icon: em })}
-                    className={`aspect-square rounded-xl text-2xl transition active:scale-90 ${
-                      editing.icon === em ? 'bg-brand-soft ring-2 ring-brand' : 'bg-surface-2'
-                    }`}
-                  >
-                    {em}
-                  </button>
-                ))}
-              </div>
-              <input
-                className="input mt-3"
-                placeholder="Hoặc dán emoji khác…"
-                value={EMOJIS.includes(editing.icon) ? '' : editing.icon}
-                onChange={(e) => setEditing({ ...editing, icon: [...e.target.value].slice(-2).join('') })}
-              />
+              <EmojiGrid value={editing.icon} onChange={(icon) => setEditing({ ...editing, icon })} />
             </div>
           </form>
         </Sheet>

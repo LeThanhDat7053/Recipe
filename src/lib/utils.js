@@ -6,9 +6,11 @@ export const uid = () =>
         return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
       })
 
+export const nowISO = () => new Date().toISOString()
+
 /** Bỏ dấu tiếng Việt + lowercase để tìm kiếm */
 export const normalize = (s = '') =>
-  s
+  (s ?? '')
     .toString()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -31,11 +33,17 @@ export function matchRecipe(recipe, query) {
   return q.split(/\s+/).every((word) => haystack.includes(word))
 }
 
-/** "1/2" | "1 1/2" | "1.5" | "1,5" -> number, không đọc được -> null */
+/* ---------------- Số lượng ---------------- */
+
+const UNICODE_FRACTIONS = { '¼': 0.25, '½': 0.5, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3 }
+
+/** "1/2" | "1 1/2" | "1.5" | "1,5" | "1½" -> number, không đọc được -> null */
 export function parseAmount(str) {
   if (str == null) return null
   const s = String(str).trim().replace(',', '.')
   if (!s) return null
+  const uni = s.match(/^(\d*)\s*([¼½¾⅓⅔])$/)
+  if (uni) return (+uni[1] || 0) + UNICODE_FRACTIONS[uni[2]]
   const mixed = s.match(/^(\d+)\s+(\d+)\/(\d+)$/)
   if (mixed) return +mixed[1] + +mixed[2] / +mixed[3]
   const frac = s.match(/^(\d+)\/(\d+)$/)
@@ -69,6 +77,53 @@ export function scaleAmount(amount, factor) {
   return n == null ? amount ?? '' : formatAmount(n * factor)
 }
 
+/* ---------------- Nguyên liệu ---------------- */
+
+export const UNITS = [
+  'kg', 'g', 'mg', 'ml', 'lít', 'l', 'muỗng canh', 'muỗng cà phê', 'muỗng', 'thìa canh', 'thìa cà phê', 'thìa',
+  'chén', 'bát', 'cốc', 'ly', 'quả', 'trái', 'củ', 'tép', 'cây', 'nhánh', 'lá', 'miếng', 'lát', 'con', 'gói',
+  'hộp', 'túi', 'lon', 'nắm', 'bó', 'chút', 'ít', 'tbsp', 'tsp', 'cup', 'cups',
+]
+const INGREDIENT_RE = new RegExp(`^([\\d.,/½¼¾⅓⅔ ]+)?\\s*(${UNITS.join('|')})?\\s+(.+)$`, 'i')
+
+/** "200 g thịt bò" -> { amount: '200', unit: 'g', name: 'thịt bò' }; "Gia vị:" -> nhóm */
+export function parseIngredientLine(line) {
+  const clean = String(line).trim().replace(/^[-•*▢☐✓]\s*/, '')
+  if (!clean) return null
+  if (clean.endsWith(':')) return { id: uid(), type: 'group', amount: '', unit: '', name: clean.slice(0, -1).trim() }
+  const m = clean.match(INGREDIENT_RE)
+  if (m && (m[1]?.trim() || m[2])) {
+    return { id: uid(), type: 'item', amount: (m[1] || '').trim(), unit: m[2] || '', name: m[3].trim() }
+  }
+  return { id: uid(), type: 'item', amount: '', unit: '', name: clean }
+}
+
+/** Gộp nguyên liệu vào danh sách đi chợ: cùng tên + đơn vị thì cộng dồn */
+export function mergeShopping(existing, incoming) {
+  const key = (i) => `${normalize(i.name)}|${normalize(i.unit)}`
+  const pool = existing.filter((i) => !i.checked).map((i) => ({ ...i }))
+  const changed = new Set()
+  for (const inc of incoming) {
+    const target = pool.find((i) => key(i) === key(inc))
+    if (target) {
+      const a = parseAmount(target.amount)
+      const b = parseAmount(inc.amount)
+      target.amount =
+        a != null && b != null ? formatAmount(a + b) : [target.amount, inc.amount].filter(Boolean).join(' + ')
+      const titles = (target.recipe_title || '').split(', ').filter(Boolean)
+      if (inc.recipe_title && !titles.includes(inc.recipe_title)) target.recipe_title = [...titles, inc.recipe_title].join(', ')
+      changed.add(target)
+    } else {
+      const item = { ...inc }
+      pool.push(item)
+      changed.add(item)
+    }
+  }
+  return [...changed]
+}
+
+/* ---------------- Thời gian ---------------- */
+
 export const totalTime = (r) => (Number(r.prep_time) || 0) + (Number(r.cook_time) || 0)
 
 export function formatMinutes(min) {
@@ -79,11 +134,51 @@ export function formatMinutes(min) {
   return m ? `${h}g ${m}p` : `${h} giờ`
 }
 
+export function formatClock(totalSeconds) {
+  const s = Math.max(0, Math.ceil(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${String(m).padStart(2, '0')}:${sec}`
+}
+
+export function timeAgo(iso) {
+  if (!iso) return ''
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(iso))) / 86400000)
+  if (days <= 0) return 'hôm nay'
+  if (days === 1) return 'hôm qua'
+  if (days < 7) return `${days} ngày trước`
+  if (days < 30) return `${Math.floor(days / 7)} tuần trước`
+  if (days < 365) return `${Math.floor(days / 30)} tháng trước`
+  return `${Math.floor(days / 365)} năm trước`
+}
+
+export const daysSince = (iso) => (iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : Infinity)
+
+/** Tìm thời lượng trong bước nấu: "luộc 10 phút", "kho 45-60 phút", "1 tiếng" */
+export function detectTimers(text = '') {
+  const re = /(\d+(?:[.,]\d+)?)(?:\s*(?:-|–|đến|tới)\s*(\d+(?:[.,]\d+)?))?\s*(giây|phút|phut|tiếng|giờ)/gi
+  const found = []
+  let m
+  while ((m = re.exec(text))) {
+    const n = parseFloat((m[2] || m[1]).replace(',', '.'))
+    const unit = m[3].toLowerCase()
+    const seconds = Math.round(unit === 'giây' ? n : unit.startsWith('ph') ? n * 60 : n * 3600)
+    if (seconds > 0 && seconds <= 24 * 3600 && !found.some((f) => f.seconds === seconds)) {
+      found.push({ seconds, label: m[0].replace(/\s+/g, ' ') })
+    }
+  }
+  return found
+}
+
 export const DIFFICULTY = {
   easy: { label: 'Dễ', dots: 1 },
   medium: { label: 'Vừa', dots: 2 },
   hard: { label: 'Khó', dots: 3 },
 }
+
+/* ---------------- Ảnh ---------------- */
 
 /** Nén ảnh trước khi upload: resize cạnh dài <= maxSize, xuất WebP */
 export async function compressImage(file, maxSize = 1280, quality = 0.8) {
@@ -94,7 +189,6 @@ export async function compressImage(file, maxSize = 1280, quality = 0.8) {
     width = bitmap.width
     height = bitmap.height
   } else {
-    // Fallback cho trình duyệt cũ
     source = await new Promise((resolve, reject) => {
       const img = new Image()
       img.onload = () => resolve(img)
@@ -122,5 +216,21 @@ export const blobToDataURL = (blob) =>
     reader.onerror = reject
     reader.readAsDataURL(blob)
   })
+
+/** Tất cả link ảnh của một món (ảnh chính + ảnh từng bước) */
+export const recipeImages = (r) => [r.image_url, ...(r.steps || []).map((s) => s.image_url)].filter(Boolean)
+
+export async function shareOrCopy({ title, text, url }, toast) {
+  try {
+    if (navigator.share) {
+      await navigator.share(Object.fromEntries(Object.entries({ title, text, url }).filter(([, v]) => v)))
+      return
+    }
+    await navigator.clipboard.writeText([text, url].filter(Boolean).join('\n'))
+    toast?.('Đã sao chép')
+  } catch (e) {
+    if (e?.name !== 'AbortError') toast?.('Không chia sẻ được', 'error')
+  }
+}
 
 export const cx = (...classes) => classes.filter(Boolean).join(' ')
