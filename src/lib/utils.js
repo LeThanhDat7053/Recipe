@@ -156,17 +156,48 @@ export function timeAgo(iso) {
 
 export const daysSince = (iso) => (iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : Infinity)
 
-/** Tìm thời lượng trong bước nấu: "luộc 10 phút", "kho 45-60 phút", "1 tiếng" */
+/** 5400 -> "1 giờ 30 phút" */
+export function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return [h && `${h} giờ`, m && `${m} phút`, sec && `${sec} giây`].filter(Boolean).join(' ') || '0 giây'
+}
+
+const NOT_WORD = '(?![\\p{L}\\d])'
+const TIMER_RE = new RegExp(
+  [
+    // 1h30, 1g30p, 1 giờ 30 phút, 2 tiếng 15'  ("g" phải dính liền số phút để không nhầm với gam)
+    `(?<!\\d)(\\d{1,2})\\s*(?:(?:h|giờ|tiếng)\\s*|g)(\\d{1,2})\\s*(?:phút|phut|ph|p|')?${NOT_WORD}`,
+    // 1 tiếng rưỡi
+    `(?<!\\d)(\\d{1,2})\\s*(?:tiếng|giờ|h)\\s*rưỡi${NOT_WORD}`,
+    // 10 phút, 10p, 15', 45-60 phút, 2 tiếng, 1h, 30 giây
+    `(\\d+(?:[.,]\\d+)?)(?:\\s*(?:-|–|đến|tới)\\s*(\\d+(?:[.,]\\d+)?))?\\s*(giây|phút|phut|ph|p|'|tiếng|giờ|h)${NOT_WORD}`,
+  ].join('|'),
+  'giu',
+)
+
+/** Tìm thời lượng trong bước nấu: "luộc 10 phút", "10p", "1h30", "kho 45-60 phút", "1 tiếng rưỡi" */
 export function detectTimers(text = '') {
-  const re = /(\d+(?:[.,]\d+)?)(?:\s*(?:-|–|đến|tới)\s*(\d+(?:[.,]\d+)?))?\s*(giây|phút|phut|tiếng|giờ)/gi
   const found = []
-  let m
-  while ((m = re.exec(text))) {
-    const n = parseFloat((m[2] || m[1]).replace(',', '.'))
-    const unit = m[3].toLowerCase()
-    const seconds = Math.round(unit === 'giây' ? n : unit.startsWith('ph') ? n * 60 : n * 3600)
-    if (seconds > 0 && seconds <= 24 * 3600 && !found.some((f) => f.seconds === seconds)) {
-      found.push({ seconds, label: m[0].replace(/\s+/g, ' ') })
+  const add = (seconds, label) => {
+    if (seconds > 0 && seconds <= 24 * 3600 && !found.some((f) => f.seconds === seconds)) found.push({ seconds, label })
+  }
+  for (const m of String(text).normalize('NFC').matchAll(TIMER_RE)) {
+    if (m[1]) {
+      const seconds = +m[1] * 3600 + +m[2] * 60
+      add(seconds, formatDuration(seconds))
+    } else if (m[3]) {
+      const seconds = +m[3] * 3600 + 1800
+      add(seconds, formatDuration(seconds))
+    } else {
+      const unit = m[6].toLowerCase()
+      const mult = unit === 'giây' ? 1 : ['tiếng', 'giờ', 'h'].includes(unit) ? 3600 : 60
+      const word = mult === 1 ? 'giây' : mult === 60 ? 'phút' : unit === 'tiếng' ? 'tiếng' : 'giờ'
+      const a = parseFloat(m[4].replace(',', '.'))
+      const b = m[5] ? parseFloat(m[5].replace(',', '.')) : null
+      add(Math.round((b ?? a) * mult), b != null ? `${m[4]}-${m[5]} ${word}` : `${m[4]} ${word}`)
     }
   }
   return found

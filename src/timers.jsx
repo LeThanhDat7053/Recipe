@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { BellRing, Plus, Timer, X } from 'lucide-react'
 import { Sheet } from './components/ui'
-import { cx, formatClock, uid } from './lib/utils'
+import { cx, formatClock, formatDuration, uid } from './lib/utils'
 
 const KEY = 'recipebook:timers:v1'
 const TimersContext = createContext(null)
@@ -133,11 +133,86 @@ export function TimerList() {
   )
 }
 
+const PRESETS = [1, 3, 5, 10, 15, 20, 30, 45, 60]
+
+/** Hẹn giờ tự chọn: bấm nhanh hoặc tự nhập số phút */
+export function QuickTimerSheet({ open, onClose, recipe, defaultLabel = '' }) {
+  const { start } = useTimers()
+  const [minutes, setMinutes] = useState('')
+  const [label, setLabel] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setMinutes('')
+      setLabel(defaultLabel)
+    }
+  }, [open, defaultLabel])
+
+  const go = (min) => {
+    const m = parseFloat(String(min).replace(',', '.'))
+    if (!(m > 0) || m > 24 * 60) return
+    const seconds = Math.round(m * 60)
+    start({ label: label.trim() || `Hẹn ${formatDuration(seconds)}`, seconds, recipeId: recipe?.id, recipeTitle: recipe?.title })
+    onClose()
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Hẹn giờ">
+      <div className="pt-2 space-y-4">
+        <div>
+          <label className="label" htmlFor="timer-label">Tên (không bắt buộc)</label>
+          <input
+            id="timer-label"
+            className="input"
+            placeholder="VD: Luộc trứng"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            enterKeyHint="done"
+          />
+        </div>
+        <div>
+          <p className="label">Bấm nhanh</p>
+          <div className="grid grid-cols-3 gap-2">
+            {PRESETS.map((m) => (
+              <button key={m} onClick={() => go(m)} className="btn-soft h-12">
+                {m < 60 ? `${m} phút` : `${m / 60} giờ`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            go(minutes)
+          }}
+        >
+          <p className="label">Hoặc tự nhập</p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                className="input pr-14"
+                inputMode="decimal"
+                placeholder="Số phút"
+                value={minutes}
+                onChange={(e) => setMinutes(e.target.value.replace(/[^\d.,]/g, '').slice(0, 5))}
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted pointer-events-none">phút</span>
+            </div>
+            <button className="btn-primary px-5 shrink-0" disabled={!(parseFloat(minutes.replace(',', '.')) > 0)}>
+              <Timer size={18} /> Bắt đầu
+            </button>
+          </div>
+        </form>
+      </div>
+    </Sheet>
+  )
+}
+
 /** Các đồng hồ nổi ở góc màn hình */
 export function TimerDock({ hidden }) {
   const { timers, now, remove } = useTimers()
-  const [open, setOpen] = useState(false)
-  if (!timers.length) return null
+  const [open, setOpen] = useState(null) // 'list' | 'quick'
+  if (!timers.length && open !== 'quick') return null
   const sorted = [...timers].sort((a, b) => a.endAt - b.endAt)
 
   return (
@@ -150,7 +225,7 @@ export function TimerDock({ hidden }) {
             return (
               <button
                 key={t.id}
-                onClick={() => (done ? remove(t.id) : setOpen(true))}
+                onClick={() => (done ? remove(t.id) : setOpen('list'))}
                 className={cx(
                   'flex items-center gap-2 h-10 pl-3 pr-4 max-w-[70vw] rounded-full shadow-lg text-sm font-semibold animate-pop-in',
                   done ? 'bg-danger text-white animate-pulse' : 'bg-ink text-bg',
@@ -163,17 +238,27 @@ export function TimerDock({ hidden }) {
             )
           })}
           {sorted.length > 3 && (
-            <button onClick={() => setOpen(true)} className="chip shadow-lg">
+            <button onClick={() => setOpen('list')} className="chip shadow-lg">
               +{sorted.length - 3} đồng hồ
             </button>
           )}
         </div>
       )}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Hẹn giờ">
+      <Sheet
+        open={open === 'list'}
+        onClose={() => setOpen(null)}
+        title="Đồng hồ đang chạy"
+        footer={
+          <button className="btn-soft w-full" onClick={() => setOpen('quick')}>
+            <Plus size={18} /> Thêm hẹn giờ
+          </button>
+        }
+      >
         <div className="pt-2">
           <TimerList />
         </div>
       </Sheet>
+      <QuickTimerSheet open={open === 'quick'} onClose={() => setOpen(null)} />
     </>
   )
 }

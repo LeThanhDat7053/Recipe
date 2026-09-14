@@ -5,7 +5,7 @@ import {
   ImageDown, Link2, LoaderCircle, NotebookPen, Pencil, RotateCcw, ShoppingCart, Timer, Trash2, Users,
 } from 'lucide-react'
 import { useStore } from '../store'
-import { useTimers } from '../timers'
+import { QuickTimerSheet, useTimers } from '../timers'
 import { useToast } from '../components/Toast'
 import { RecipeImage } from '../components/RecipeCard'
 import { CardSheet, CollectionSheet, LogSheet, ShareSheet } from '../components/RecipeSheets'
@@ -253,9 +253,14 @@ export function RecipeView({ recipe, shared }) {
             <p className="py-8 text-center text-muted">Chưa có hướng dẫn</p>
           ) : (
             <>
-              <p className="py-2 text-sm text-muted">
-                Chạm vào bước để đánh dấu đã xong · {done.filter((d) => steps.some((s) => s.id === d)).length}/{steps.length}
-              </p>
+              <div className="flex items-center gap-2 py-2">
+                <p className="flex-1 text-sm text-muted">
+                  Chạm vào bước để đánh dấu xong · {done.filter((d) => steps.some((s) => s.id === d)).length}/{steps.length}
+                </p>
+                <button onClick={() => setSheet('timer')} className="chip h-8 shrink-0">
+                  <Timer size={14} className="text-brand" /> Hẹn giờ
+                </button>
+              </div>
               <ol className="space-y-3">
                 {steps.map((s, i) => {
                   const isDone = done.includes(s.id)
@@ -358,6 +363,8 @@ export function RecipeView({ recipe, shared }) {
           )}
         </div>
       </div>
+
+      <QuickTimerSheet open={sheet === 'timer'} onClose={() => setSheet(null)} recipe={recipe} />
 
       {owner && (
         <>

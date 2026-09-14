@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, ListChecks, PartyPopper, RotateCcw, SlidersHorizontal, Timer, Volume2, VolumeX, X } from 'lucide-react'
 import { VoiceSheet } from '../components/VoiceSheet'
 import { useStore } from '../store'
-import { TimerList, useTimers } from '../timers'
+import { QuickTimerSheet, TimerList, useTimers } from '../timers'
 import { useToast } from '../components/Toast'
 import { LogSheet } from '../components/RecipeSheets'
 import { CheckCircle, EmptyState, Sheet, Spinner, Stepper, useGoBack } from '../components/ui'
@@ -158,6 +158,9 @@ function Cook({ recipe }) {
               <Timer size={20} /> Hẹn giờ {t.label}
             </button>
           ))}
+          <button onClick={() => setSheet('timer')} className="btn-soft h-12">
+            <Timer size={20} /> {detected.length ? 'Hẹn giờ khác' : 'Hẹn giờ'}
+          </button>
           {speech.supported && !autoRead && (
             <button onClick={() => speech.speak(`Bước ${current + 1}. ${step.text}`)} className="btn-soft h-12">
               <Volume2 size={20} /> Đọc bước này
@@ -233,6 +236,7 @@ function Cook({ recipe }) {
       </Sheet>
 
       <VoiceSheet open={sheet === 'voice'} onClose={() => setSheet(null)} />
+      <QuickTimerSheet open={sheet === 'timer'} onClose={() => setSheet(null)} recipe={recipe} defaultLabel={`Bước ${current + 1}`} />
 
       <LogSheet
         open={sheet === 'log'}
