@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# SPA: mọi đường dẫn đều trả về index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# File đã có hash trong tên -> cache vĩnh viễn
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

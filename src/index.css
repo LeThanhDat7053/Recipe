@@ -1,0 +1,118 @@
+@import '@fontsource/be-vietnam-pro/400.css';
+@import '@fontsource/be-vietnam-pro/500.css';
+@import '@fontsource/be-vietnam-pro/600.css';
+@import '@fontsource/be-vietnam-pro/700.css';
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* Màu ngữ nghĩa — đổi theo sáng/tối bên dưới */
+  --color-bg: #fffaf5;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6efe8;
+  --color-ink: #1f1a17;
+  --color-muted: #7a6f68;
+  --color-line: #ece3da;
+  --color-brand: #ea580c;
+  --color-brand-ink: #ffffff;
+  --color-brand-soft: #ffedd5;
+  --color-danger: #dc2626;
+  --color-ok: #16a34a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #151210;
+    --color-surface: #211c19;
+    --color-surface-2: #2c2622;
+    --color-ink: #f5efe9;
+    --color-muted: #a89c93;
+    --color-line: #3a322d;
+    --color-brand: #fb7c3c;
+    --color-brand-ink: #1a0f08;
+    --color-brand-soft: #3d2415;
+    --color-danger: #f87171;
+    --color-ok: #4ade80;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    min-height: 100dvh;
+  }
+  /* 16px để iOS không tự zoom khi focus ô nhập */
+  input, textarea, select, button {
+    font: inherit;
+    font-size: max(16px, 1em);
+  }
+  button { cursor: pointer; }
+  ::selection { background: var(--color-brand-soft); }
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 h-12 font-semibold
+    transition active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none select-none;
+}
+@utility btn-primary { @apply btn bg-brand text-brand-ink shadow-sm; }
+@utility btn-soft { @apply btn bg-surface-2 text-ink; }
+@utility btn-ghost { @apply btn bg-transparent text-ink; }
+@utility btn-danger { @apply btn bg-danger/10 text-danger; }
+
+@utility icon-btn {
+  @apply inline-flex items-center justify-center size-11 shrink-0 rounded-full transition active:scale-90 select-none;
+}
+
+@utility input {
+  @apply w-full min-w-0 rounded-2xl bg-surface border border-line px-4 h-12 text-ink outline-none
+    placeholder:text-muted/70 focus:border-brand focus:ring-4 focus:ring-brand/15 transition;
+}
+@utility textarea {
+  @apply input h-auto py-3 leading-relaxed resize-none;
+}
+
+@utility label { @apply block text-sm font-medium text-muted mb-1.5; }
+
+@utility card { @apply bg-surface rounded-3xl border border-line; }
+
+@utility chip {
+  @apply inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm font-medium whitespace-nowrap
+    bg-surface border border-line text-ink transition active:scale-95;
+}
+@utility chip-active { @apply bg-ink text-bg border-ink; }
+
+@utility section-title { @apply text-lg font-bold tracking-tight; }
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+@utility pt-safe { padding-top: env(safe-area-inset-top); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.animate-slide-up { animation: slide-up 0.28s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-pop-in { animation: pop-in 0.25s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
