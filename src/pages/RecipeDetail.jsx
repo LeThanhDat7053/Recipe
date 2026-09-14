@@ -8,7 +8,7 @@ import { useStore } from '../store'
 import { QuickTimerSheet, useTimers } from '../timers'
 import { useToast } from '../components/Toast'
 import { RecipeImage } from '../components/RecipeCard'
-import { CardSheet, CollectionSheet, LogSheet, ShareSheet } from '../components/RecipeSheets'
+import { CardSheet, CollectionSheet, LogSheet, ShareSheet, ShoppingPickSheet } from '../components/RecipeSheets'
 import { CheckCircle, ConfirmSheet, EmptyState, MenuItem, Sheet, Spinner, Stars, Stepper, useGoBack } from '../components/ui'
 import { useSessionState } from '../lib/hooks'
 import { cx, detectTimers, DIFFICULTY, formatMinutes, scaleAmount, timeAgo, totalTime } from '../lib/utils'
@@ -79,15 +79,7 @@ export function RecipeView({ recipe, shared }) {
     }
   }
 
-  const addToShopping = run(async () => {
-    const items = ingredients
-      .filter((i) => i.type !== 'group' && !checked.includes(i.id))
-      .map((i) => ({ ...i, amount: scaleAmount(i.amount, factor) }))
-    if (!items.length) return toast('Bạn đã tick hết nguyên liệu rồi')
-    const n = await store.addShoppingItems(items, recipe.title)
-    setSheet(null)
-    toast(`Đã thêm ${n} thứ vào danh sách đi chợ`)
-  })
+  const addToShopping = () => setSheet('shop')
 
   const difficulty = DIFFICULTY[recipe.difficulty]
   const total = totalTime(recipe)
@@ -242,7 +234,7 @@ export function RecipeView({ recipe, shared }) {
             )}
             {owner && itemCount > 0 && (
               <button onClick={addToShopping} className="btn-soft w-full mt-4">
-                <ShoppingCart size={18} /> {checked.length ? 'Thêm thứ chưa tick vào đi chợ' : 'Thêm vào danh sách đi chợ'}
+                <ShoppingCart size={18} /> Thêm vào danh sách đi chợ
               </button>
             )}
           </>
@@ -384,6 +376,7 @@ export function RecipeView({ recipe, shared }) {
             </div>
           </Sheet>
           <ShareSheet open={sheet === 'share'} onClose={() => setSheet(null)} recipe={recipe} />
+          <ShoppingPickSheet open={sheet === 'shop'} onClose={() => setSheet(null)} recipe={recipe} factor={factor} checkedIds={checked} />
           <CollectionSheet open={sheet === 'collection'} onClose={() => setSheet(null)} recipe={recipe} />
           <CardSheet open={sheet === 'card'} onClose={() => setSheet(null)} recipe={recipe} factor={factor} servings={servings} />
           <LogSheet open={sheet === 'log'} onClose={() => setSheet(null)} recipe={recipe} />

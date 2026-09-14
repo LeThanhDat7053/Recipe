@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, Camera, ClipboardPaste, Heading, ImagePlus, Link2, 
 import { useStore } from '../store'
 import { useToast } from '../components/Toast'
 import { ConfirmSheet, EmptyState, Sheet, Spinner, Stepper, useGoBack } from '../components/ui'
-import { cx, DIFFICULTY, parseIngredientLine, recipeImages, uid, UNITS } from '../lib/utils'
+import { cx, DIFFICULTY, isSpiceGroup, parseIngredientLine, recipeImages, uid, UNITS } from '../lib/utils'
 
 const emptyItem = (type = 'item') => ({ id: uid(), type, amount: '', unit: '', name: '' })
 const emptyStep = () => ({ id: uid(), text: '', image_url: null })
@@ -171,6 +171,13 @@ function Editor({ original }) {
     const step = emptyStep()
     focusId.current = `step-${step.id}`
     insertAfter('steps', null, step)
+  }
+  const hasSpiceGroup = form.ingredients.some((i) => i.type === 'group' && isSpiceGroup(i.name))
+  const addSpiceGroup = () => {
+    const group = { ...emptyItem('group'), name: 'Gia vị' }
+    const item = emptyItem()
+    focusId.current = `amount-${item.id}`
+    setForm((f) => ({ ...f, ingredients: [...f.ingredients, group, item] }))
   }
 
   const applyBulk = (text) => {
@@ -451,6 +458,14 @@ function Editor({ original }) {
               <Heading size={18} /> Nhóm
             </button>
           </div>
+          {!hasSpiceGroup && (
+            <button type="button" className="btn-ghost w-full mt-1 h-11 text-brand" onClick={addSpiceGroup}>
+              🧂 Thêm nhóm Gia vị
+            </button>
+          )}
+          <p className="mt-2 text-xs text-muted leading-relaxed">
+            Nguyên liệu trong nhóm <b>Gia vị</b> và gia vị cơ bản (muối, đường, nước mắm…) sẽ không tự thêm vào đi chợ.
+          </p>
         </section>
 
         {/* Các bước */}

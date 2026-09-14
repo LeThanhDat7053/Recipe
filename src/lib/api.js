@@ -20,7 +20,10 @@ export const TABLES = {
   cook_logs: ['id', 'recipe_id', 'cooked_at', 'note'],
   collections: ['id', 'name', 'icon', 'recipe_ids', 'sort_order', 'created_at'],
   shopping_items: ['id', 'name', 'amount', 'unit', 'checked', 'recipe_title', 'sort_order', 'created_at'],
+  settings: ['id', 'value'],
 }
+// Bảng mới thêm sau: chưa chạy lại schema.sql thì coi như trống, không làm hỏng cả app
+const OPTIONAL_TABLES = new Set(['settings'])
 export const TABLE_NAMES = Object.keys(TABLES)
 export const emptyDb = () => Object.fromEntries(TABLE_NAMES.map((t) => [t, []]))
 
@@ -37,8 +40,16 @@ export async function fetchAll() {
   const results = await Promise.all(TABLE_NAMES.map((t) => supabase.from(t).select('*').range(0, 4999)))
   const db = {}
   results.forEach((res, i) => {
-    if (res.error) throw res.error
-    db[TABLE_NAMES[i]] = res.data
+    const table = TABLE_NAMES[i]
+    if (res.error) {
+      if (OPTIONAL_TABLES.has(table) && !isNetworkError(res.error)) {
+        console.warn(`Chưa có bảng "${table}", hãy chạy lại supabase/schema.sql`)
+        db[table] = []
+        return
+      }
+      throw res.error
+    }
+    db[table] = res.data
   })
   return db
 }

@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Check, Copy, Download, Globe, LoaderCircle, Plus, Share2 } from 'lucide-react'
 import { useStore } from '../store'
 import { useToast } from './Toast'
-import { ConfirmSheet, EmojiGrid, Sheet, Spinner, Switch } from './ui'
-import { cx, nowISO, shareOrCopy } from '../lib/utils'
+import { CheckCircle, ConfirmSheet, EmojiGrid, Sheet, Spinner, Switch } from './ui'
+import { cx, nowISO, scaleAmount, shareOrCopy, splitForShopping } from '../lib/utils'
 
 const pad = (n) => String(n).padStart(2, '0')
 const todayStr = () => {
@@ -76,6 +76,89 @@ export function LogSheet({ open, onClose, recipe, title = 'Ghi lại lần nấu
           />
         </div>
       </div>
+    </Sheet>
+  )
+}
+
+/* ---------------- Chọn nguyên liệu thêm vào đi chợ ---------------- */
+export function ShoppingPickSheet({ open, onClose, recipe, factor = 1, checkedIds = [] }) {
+  const { addShoppingItems, pantry } = useStore()
+  const toast = useToast()
+  const [groups, setGroups] = useState({ need: [], have: [], spices: [] })
+  const [selected, setSelected] = useState(() => new Set())
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const g = splitForShopping(recipe.ingredients || [], checkedIds, pantry)
+    setGroups(g)
+    setSelected(new Set(g.need.map((i) => i.id)))
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggle = (id) =>
+    setSelected((s) => {
+      const next = new Set(s)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const add = async () => {
+    setBusy(true)
+    try {
+      const all = [...groups.need, ...groups.have, ...groups.spices]
+      const items = all.filter((i) => selected.has(i.id)).map((i) => ({ ...i, amount: scaleAmount(i.amount, factor) }))
+      const n = await addShoppingItems(items, recipe.title)
+      toast(`Đã thêm ${n} thứ vào danh sách đi chợ`)
+      onClose()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const Section = ({ title, hint, items }) =>
+    items.length > 0 && (
+      <section className="pt-3">
+        <p className="text-sm font-semibold">{title}</p>
+        {hint && <p className="text-xs text-muted">{hint}</p>}
+        <ul className="mt-1">
+          {items.map((i) => (
+            <li key={i.id}>
+              <button onClick={() => toggle(i.id)} className="w-full flex items-center gap-3 py-2.5 text-left border-b border-line">
+                <CheckCircle on={selected.has(i.id)} />
+                <span className={cx('flex-1 leading-snug', !selected.has(i.id) && 'text-muted')}>
+                  {(i.amount || i.unit) && (
+                    <b className="font-semibold mr-1.5">
+                      {scaleAmount(i.amount, factor)} {i.unit}
+                    </b>
+                  )}
+                  {i.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Thêm vào đi chợ"
+      footer={
+        <button className="btn-primary w-full" onClick={add} disabled={busy || selected.size === 0}>
+          {busy ? <LoaderCircle size={20} className="animate-spin" /> : `Thêm ${selected.size} thứ vào đi chợ`}
+        </button>
+      }
+    >
+      <Section title="Cần mua" items={groups.need} />
+      <Section title="Bạn đã tick là có sẵn" items={groups.have} />
+      <Section title="🧂 Gia vị (thường có sẵn)" hint="Hết thì chạm để chọn mua" items={groups.spices} />
+      {!groups.need.length && !groups.have.length && !groups.spices.length && (
+        <p className="py-8 text-center text-muted">Món này chưa có nguyên liệu</p>
+      )}
     </Sheet>
   )
 }

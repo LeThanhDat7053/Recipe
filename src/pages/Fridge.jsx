@@ -3,16 +3,12 @@ import { Plus, X } from 'lucide-react'
 import { useStore } from '../store'
 import { RecipeRow } from '../components/RecipeCard'
 import { EmptyState, PageHeader, Switch } from '../components/ui'
-import { normalize } from '../lib/utils'
+import { isPantryItem, normalize } from '../lib/utils'
 
 const KEY = 'recipebook:fridge:v1'
-// Gia vị nhà nào cũng có -> không tính là "thiếu"
-const BASICS = new Set(
-  ['muối', 'đường', 'tiêu', 'hạt tiêu', 'nước mắm', 'dầu ăn', 'dầu', 'bột ngọt', 'mì chính', 'hạt nêm', 'nước', 'nước lọc', 'nước sôi', 'xì dầu', 'nước tương', 'đá', 'đá viên'].map(normalize),
-)
 
 export default function Fridge() {
-  const { recipes } = useStore()
+  const { recipes, pantry } = useStore()
   const [have, setHave] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(KEY)) || []
@@ -35,11 +31,11 @@ export default function Fridge() {
       (r.ingredients || []).forEach((i) => {
         if (i.type === 'group' || !i.name?.trim()) return
         const key = normalize(i.name)
-        if (!map.has(key) && !BASICS.has(key)) map.set(key, i.name.trim())
+        if (!map.has(key) && !isPantryItem(i.name, pantry)) map.set(key, i.name.trim())
       }),
     )
     return [...map.values()].sort((a, b) => a.localeCompare(b, 'vi'))
-  }, [recipes])
+  }, [recipes, pantry])
 
   const haveKeys = have.map(normalize)
   const suggestions = text.trim()
@@ -61,7 +57,7 @@ export default function Fridge() {
     return recipes
       .map((recipe) => {
         const items = (recipe.ingredients || []).filter(
-          (i) => i.type !== 'group' && i.name?.trim() && !(skipBasics && BASICS.has(normalize(i.name))),
+          (i) => i.type !== 'group' && i.name?.trim() && !(skipBasics && isPantryItem(i.name, pantry)),
         )
         if (!items.length) return null
         const missing = items.filter((i) => !owns(i.name))
@@ -70,7 +66,7 @@ export default function Fridge() {
       })
       .filter(Boolean)
       .sort((a, b) => a.missing.length - b.missing.length || b.got - a.got)
-  }, [recipes, haveKeys.join('|'), skipBasics]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recipes, haveKeys.join('|'), skipBasics, pantry]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const ready = results.filter((r) => !r.missing.length)
   const almost = results.filter((r) => r.missing.length)

@@ -81,6 +81,14 @@ create table if not exists public.shopping_items (
   created_at timestamptz not null default now()
 );
 
+-- ---------------- Cài đặt chung của cả nhà ----------------
+-- id = 'pantry': danh sách gia vị có sẵn trong bếp
+create table if not exists public.settings (
+  id text primary key,
+  value jsonb not null default 'null',
+  updated_at timestamptz not null default now()
+);
+
 -- Bản cũ có cột user_id (dữ liệu theo tài khoản) -> không dùng nữa
 alter table public.categories drop column if exists user_id;
 alter table public.recipes drop column if exists user_id;
@@ -123,6 +131,10 @@ create policy "family collections" on public.collections for all to anon, authen
 
 drop policy if exists "family shopping_items" on public.shopping_items;
 create policy "family shopping_items" on public.shopping_items for all to anon, authenticated using (true) with check (true);
+
+alter table public.settings enable row level security;
+drop policy if exists "family settings" on public.settings;
+create policy "family settings" on public.settings for all to anon, authenticated using (true) with check (true);
 
 -- ------------------------------------------------------------
 -- Xem một món qua link chia sẻ

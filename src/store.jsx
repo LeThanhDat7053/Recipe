@@ -2,7 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as api from './lib/api'
 import { emptyDb, isCloud, isNetworkError } from './lib/api'
 import { createSeed } from './lib/seed'
-import { daysSince, mergeShopping, nowISO, parseIngredientLine, recipeImages, uid } from './lib/utils'
+import {
+  clearLegacyPantry, daysSince, DEFAULT_PANTRY, mergeShopping, nowISO, parseIngredientLine, readLegacyPantry, recipeImages, uid,
+} from './lib/utils'
 import { useToast } from './components/Toast'
 
 const StoreContext = createContext(null)
@@ -317,6 +319,9 @@ export function StoreProvider({ children }) {
       },
       removeShopping: (ids) => remove('shopping_items', ids),
 
+      /** Danh sách gia vị có sẵn trong bếp (dùng chung cả nhà) */
+      savePantry: (list) => upsert('settings', [{ id: 'pantry', value: list }]),
+
       async getShared(shareId) {
         if (!isCloud) return dbRef.current.recipes.find((r) => r.share_id === shareId && !r.deleted_at) || null
         return api.getSharedRecipe(shareId)
@@ -325,6 +330,17 @@ export function StoreProvider({ children }) {
       uploadImage: api.uploadImage,
     }
   }, [write, refresh])
+
+  // Chuyển danh sách gia vị đã chỉnh trên máy (bản trước) lên database, chỉ một lần
+  const pantryMigrated = useRef(false)
+  useEffect(() => {
+    if (loading || pantryMigrated.current) return
+    pantryMigrated.current = true
+    const legacy = readLegacyPantry()
+    if (!legacy) return
+    if (!db.settings.some((s) => s.id === 'pantry')) actions.savePantry(legacy).catch(() => {})
+    clearLegacyPantry()
+  }, [loading, db, actions])
 
   // Tự dọn món trong thùng rác quá 30 ngày
   useEffect(() => {
@@ -350,7 +366,9 @@ export function StoreProvider({ children }) {
     const shoppingItems = [...db.shopping_items].sort(
       (a, b) => bySort(a, b) || (a.created_at || '').localeCompare(b.created_at || ''),
     )
+    const pantryRow = db.settings.find((s) => s.id === 'pantry')
     return {
+      pantry: Array.isArray(pantryRow?.value) ? pantryRow.value : DEFAULT_PANTRY,
       recipes,
       trash,
       categories,

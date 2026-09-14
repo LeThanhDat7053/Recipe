@@ -98,6 +98,61 @@ export function parseIngredientLine(line) {
   return { id: uid(), type: 'item', amount: '', unit: '', name: clean }
 }
 
+/* ---------------- Gia vị có sẵn trong bếp ---------------- */
+
+export const DEFAULT_PANTRY = [
+  'muối', 'đường', 'tiêu', 'hạt tiêu', 'bột ngọt', 'mì chính', 'hạt nêm', 'bột canh', 'nước mắm', 'dầu ăn',
+  'dầu hào', 'xì dầu', 'nước tương', 'giấm', 'nước', 'nước lọc', 'nước sôi', 'đá', 'đá viên',
+]
+// Từ quá chung: chỉ tính khi trùng khớp hẳn ("nước" là gia vị, "nước dừa" thì không)
+const GENERIC_PANTRY = new Set(['nuoc', 'dau', 'da', 'duong'])
+
+/** Bản trước lưu danh sách gia vị riêng trên máy -> dùng để chuyển lên database một lần */
+const LEGACY_PANTRY_KEY = 'recipebook:pantry:v1'
+export function readLegacyPantry() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LEGACY_PANTRY_KEY))
+    return Array.isArray(saved) ? saved : null
+  } catch {
+    return null
+  }
+}
+export function clearLegacyPantry() {
+  try {
+    localStorage.removeItem(LEGACY_PANTRY_KEY)
+  } catch { /* ignore */ }
+}
+
+/** "Muối", "tiêu xay", "hạt nêm Knorr" -> true; "nước dừa" -> false */
+export function isPantryItem(name, pantry = DEFAULT_PANTRY) {
+  const n = normalize(name)
+  return pantry.some((p) => {
+    const k = normalize(p)
+    return n === k || (!GENERIC_PANTRY.has(k) && n.startsWith(`${k} `))
+  })
+}
+
+export const isSpiceGroup = (name) => /\bgia vi\b|\bseasoning/.test(normalize(name))
+
+/** Chia nguyên liệu: cần mua / đã tick (có sẵn) / gia vị */
+export function splitForShopping(ingredients = [], checkedIds = [], pantry = DEFAULT_PANTRY) {
+  const need = []
+  const have = []
+  const spices = []
+  let inSpiceGroup = false
+  for (const i of ingredients) {
+    if (i.type === 'group') {
+      inSpiceGroup = isSpiceGroup(i.name)
+      continue
+    }
+    if (!i.name?.trim()) continue
+    if (inSpiceGroup || isPantryItem(i.name, pantry)) spices.push(i)
+    else if (checkedIds.includes(i.id)) have.push(i)
+    else need.push(i)
+  }
+  return { need, have, spices }
+}
+
 /** Gộp nguyên liệu vào danh sách đi chợ: cùng tên + đơn vị thì cộng dồn */
 export function mergeShopping(existing, incoming) {
   const key = (i) => `${normalize(i.name)}|${normalize(i.unit)}`

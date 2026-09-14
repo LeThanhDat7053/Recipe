@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Cloud, Download, HardDrive, LoaderCircle, RefreshCw, Smartphone, Trash2, Upload, Volume2 } from 'lucide-react'
+import { ChevronRight, Cloud, Download, HardDrive, LoaderCircle, Plus, RefreshCw, Smartphone, Trash2, Upload, Volume2, X } from 'lucide-react'
+import { DEFAULT_PANTRY, normalize } from '../lib/utils'
 import { useStore } from '../store'
 import { useToast } from '../components/Toast'
 import { VoiceSheet } from '../components/VoiceSheet'
@@ -41,6 +42,8 @@ export default function Account() {
           <Stat value={cookLogs.length} label="Lần nấu" />
         </div>
 
+        <PantryCard />
+
         <VoiceRow />
 
         <Link to="/trash" className="card flex items-center gap-3 px-4 h-14 active:bg-surface-2">
@@ -76,6 +79,49 @@ const Stat = ({ value, label }) => (
     <p className="text-xs text-muted">{label}</p>
   </div>
 )
+
+function PantryCard() {
+  const { pantry: list, savePantry } = useStore()
+  const toast = useToast()
+  const [text, setText] = useState('')
+
+  const update = (next) => savePantry(next).catch((e) => toast(e.message, 'error'))
+  const add = (e) => {
+    e.preventDefault()
+    const v = text.trim().toLowerCase()
+    if (v && !list.some((x) => normalize(x) === normalize(v))) update([...list, v])
+    setText('')
+  }
+
+  return (
+    <div className="card p-4">
+      <p className="font-semibold">🧂 Gia vị có sẵn trong bếp</p>
+      <p className="text-sm text-muted mt-0.5">
+        Không tự thêm vào đi chợ và không tính là "thiếu" ở Tủ lạnh còn gì. Dùng chung cả nhà. Chạm để bỏ.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {list.map((x) => (
+          <button
+            key={x}
+            onClick={() => update(list.filter((y) => y !== x))}
+            className="flex items-center gap-1 rounded-full bg-surface-2 pl-3 pr-2 py-1 text-sm active:scale-95 transition"
+          >
+            {x} <X size={14} className="text-muted" />
+          </button>
+        ))}
+      </div>
+      <form onSubmit={add} className="mt-3 flex gap-2">
+        <input className="input h-11" placeholder="Thêm gia vị… (VD: ngũ vị hương)" value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="done" />
+        <button className="btn-soft h-11 px-4 shrink-0" disabled={!text.trim()} aria-label="Thêm">
+          <Plus size={18} />
+        </button>
+      </form>
+      <button onClick={() => update(DEFAULT_PANTRY)} className="mt-2 text-sm text-muted">
+        Khôi phục mặc định
+      </button>
+    </div>
+  )
+}
 
 function VoiceRow() {
   const [open, setOpen] = useState(false)
