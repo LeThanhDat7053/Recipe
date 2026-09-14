@@ -4,7 +4,7 @@ import { ChevronRight, CloudOff, RefreshCw, Search, Settings, Shuffle } from 'lu
 import { useStore } from '../store'
 import { RecipeListSkeleton, RecipeRow, RecipeTile } from '../components/RecipeCard'
 import { EmptyState } from '../components/ui'
-import { daysSince, timeAgo } from '../lib/utils'
+import { daysSince, formatVndShort, timeAgo } from '../lib/utils'
 
 function greeting(name) {
   const h = new Date().getHours()
@@ -16,7 +16,7 @@ function greeting(name) {
 }
 
 export default function Home() {
-  const { recipes, categories, cookStats, shoppingItems, loading, error, pendingCount, canEdit } = useStore()
+  const { recipes, categories, cookStats, shoppingItems, purchases, loading, error, pendingCount, canEdit } = useStore()
   const navigate = useNavigate()
 
   const favorites = useMemo(() => recipes.filter((r) => r.is_favorite), [recipes])
@@ -30,6 +30,9 @@ export default function Home() {
   )
   const recent = recipes.slice(0, 8)
   const toBuy = shoppingItems.filter((i) => !i.checked).length
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+  const monthTotal = purchases.reduce((s, p) => (new Date(p.bought_at).getTime() >= monthStart ? s + (p.price || 0) : s), 0)
   const counts = useMemo(() => {
     const map = {}
     recipes.forEach((r) => (map[r.category_id] = (map[r.category_id] || 0) + 1))
@@ -67,9 +70,10 @@ export default function Home() {
           <span>Tìm món, nguyên liệu…</span>
         </Link>
 
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <QuickCard to="/fridge" emoji="🧊" title="Tủ lạnh còn gì?" text="Gợi ý món nấu được" />
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <QuickCard to="/fridge" emoji="🧊" title="Tủ lạnh" text="Nấu gì từ đồ có sẵn" />
           <QuickCard to="/shopping" emoji="🛒" title="Đi chợ" text={toBuy ? `${toBuy} thứ cần mua` : 'Danh sách trống'} />
+          <QuickCard to="/expenses" emoji="💰" title="Tiền chợ" text={monthTotal ? `Tháng này ${formatVndShort(monthTotal)}` : 'Chưa ghi khoản nào'} />
         </div>
       </header>
 

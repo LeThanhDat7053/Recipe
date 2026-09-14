@@ -17,6 +17,7 @@ const Account = lazy(() => import('./pages/Account'))
 const Fridge = lazy(() => import('./pages/Fridge'))
 const Trash = lazy(() => import('./pages/Trash'))
 const Shared = lazy(() => import('./pages/Shared'))
+const Expenses = lazy(() => import('./pages/Expenses'))
 
 export const router = createBrowserRouter([
   // Link chia sẻ công khai: xem được khi chưa đăng nhập
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: '/collections/:id', element: <CategoryDetail kind="collection" /> },
       { path: '/search', element: <Search /> },
       { path: '/shopping', element: <Shopping /> },
+      { path: '/expenses', element: <Expenses /> },
       { path: '/fridge', element: <Fridge /> },
       { path: '/account', element: <Account /> },
       { path: '/trash', element: <Trash /> },

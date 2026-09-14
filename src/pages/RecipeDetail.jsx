@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   BookOpen, CalendarCheck, Check, ChefHat, ChevronLeft, Clock, Copy, Ellipsis, Flame, FolderHeart, Heart,
-  ImageDown, Link2, LoaderCircle, NotebookPen, Pencil, RotateCcw, ShoppingCart, Timer, Trash2, Users,
+  ChevronRight, ImageDown, Link2, LoaderCircle, NotebookPen, Pencil, RotateCcw, ShoppingCart, Timer, Trash2, Users, Wallet,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { QuickTimerSheet, useTimers } from '../timers'
@@ -11,7 +11,9 @@ import { RecipeImage } from '../components/RecipeCard'
 import { CardSheet, CollectionSheet, LogSheet, ShareSheet, ShoppingPickSheet } from '../components/RecipeSheets'
 import { CheckCircle, ConfirmSheet, EmptyState, MenuItem, Sheet, Spinner, Stars, Stepper, useGoBack } from '../components/ui'
 import { useSessionState } from '../lib/hooks'
-import { cx, detectTimers, DIFFICULTY, formatMinutes, scaleAmount, timeAgo, totalTime } from '../lib/utils'
+import {
+  cx, detectTimers, DIFFICULTY, estimateRecipeCost, formatMinutes, formatVnd, roundThousand, scaleAmount, timeAgo, totalTime,
+} from '../lib/utils'
 
 export default function RecipeDetail() {
   const { id } = useParams()
@@ -42,7 +44,7 @@ export default function RecipeDetail() {
 export function RecipeView({ recipe, shared }) {
   const owner = !shared
   const store = useStore()
-  const { categoryMap, cookLogs, cookStats } = store
+  const { categoryMap, cookLogs, cookStats, purchases, pantry } = store
   const toast = useToast()
   const navigate = useNavigate()
   const goBack = useGoBack('/')
@@ -69,6 +71,10 @@ export function RecipeView({ recipe, shared }) {
   const [tab, setTab] = useSessionState(`tab:${recipe.id}`, 'ing')
   const activeTab = tabs.some((t) => t.key === tab) ? tab : 'ing'
   const factor = servings / baseServings
+  const cost = useMemo(
+    () => (owner && purchases?.length ? estimateRecipeCost(recipe, purchases, { factor, pantry }) : null),
+    [owner, recipe, purchases, factor, pantry],
+  )
 
   const toggle = (setter, key) => setter((list) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]))
   const run = (fn) => async () => {
@@ -138,6 +144,22 @@ export function RecipeView({ recipe, shared }) {
           <p className="mt-1 text-sm text-muted">
             Đã nấu {stats.count} lần · gần nhất {timeAgo(stats.last)}
           </p>
+        )}
+
+        {cost && cost.pricedCount > 0 && (
+          <button onClick={() => setSheet('cost')} className="card mt-3 w-full flex items-center gap-3 px-4 py-3 text-left active:bg-surface-2">
+            <Wallet size={20} className="text-brand shrink-0" />
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">
+                ≈ {formatVnd(roundThousand(cost.total))}
+                <span className="font-normal text-muted"> · {formatVnd(roundThousand(cost.total / servings))}/người</span>
+              </span>
+              <span className="block text-xs text-muted">
+                Ước tính từ giá chợ gần nhất · {cost.pricedCount}/{cost.totalCount} nguyên liệu có giá
+              </span>
+            </span>
+            <ChevronRight size={18} className="text-muted shrink-0" />
+          </button>
         )}
 
         <div className="mt-4 grid grid-cols-3 gap-2">
@@ -377,6 +399,42 @@ export function RecipeView({ recipe, shared }) {
           </Sheet>
           <ShareSheet open={sheet === 'share'} onClose={() => setSheet(null)} recipe={recipe} />
           <ShoppingPickSheet open={sheet === 'shop'} onClose={() => setSheet(null)} recipe={recipe} factor={factor} checkedIds={checked} />
+          {cost && (
+            <Sheet open={sheet === 'cost'} onClose={() => setSheet(null)} title={`Ước tính cho ${servings} người`}>
+              <ul className="pt-1">
+                {cost.items.map(({ ing, cost: c, approx, purchase }) => (
+                  <li key={ing.id} className="flex items-center gap-3 py-2.5 border-b border-line">
+                    <span className="flex-1 min-w-0">
+                      <span className="block leading-snug">
+                        {(ing.amount || ing.unit) && (
+                          <b className="font-semibold mr-1.5">
+                            {scaleAmount(ing.amount, factor)} {ing.unit}
+                          </b>
+                        )}
+                        {ing.name}
+                      </span>
+                      {purchase && (
+                        <span className="block text-xs text-muted">
+                          {approx ? 'Nguyên giá lần mua' : 'Tính theo lần mua'} {[purchase.amount, purchase.unit].filter(Boolean).join(' ')}{' '}
+                          {formatVnd(purchase.price)} · {timeAgo(purchase.bought_at)}
+                        </span>
+                      )}
+                    </span>
+                    <span className={cx('shrink-0 tabular-nums', c == null ? 'text-sm text-muted' : 'font-semibold')}>
+                      {c == null ? 'chưa có giá' : `${approx ? '≈ ' : ''}${formatVnd(roundThousand(c))}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex items-baseline justify-between pt-4">
+                <span className="font-semibold">Tổng ước tính</span>
+                <span className="text-xl font-bold tabular-nums">{formatVnd(roundThousand(cost.total))}</span>
+              </div>
+              <p className="pt-2 text-xs text-muted leading-relaxed">
+                Không tính gia vị. Giá lấy từ lần mua gần nhất trong Sổ tiền chợ, tự quy đổi g/kg và ml/lít. Nguyên liệu chưa có giá không được cộng vào.
+              </p>
+            </Sheet>
+          )}
           <CollectionSheet open={sheet === 'collection'} onClose={() => setSheet(null)} recipe={recipe} />
           <CardSheet open={sheet === 'card'} onClose={() => setSheet(null)} recipe={recipe} factor={factor} servings={servings} />
           <LogSheet open={sheet === 'log'} onClose={() => setSheet(null)} recipe={recipe} />

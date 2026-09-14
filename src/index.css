@@ -19,6 +19,8 @@
   --color-brand-soft: #ffedd5;
   --color-danger: #dc2626;
   --color-ok: #16a34a;
+  /* Cột biểu đồ (đã kiểm tra độ tương phản với nền) */
+  --color-chart: #ea580c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -34,6 +36,7 @@
     --color-brand-soft: #3d2415;
     --color-danger: #f87171;
     --color-ok: #4ade80;
+    --color-chart: #e8661c;
   }
 }
 

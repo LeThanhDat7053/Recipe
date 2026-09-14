@@ -96,6 +96,9 @@ Tính năng này dùng một **Netlify Function** ([netlify/functions/import-rec
 **Lên kế hoạch**
 - **Đi chợ:** thêm nguyên liệu từ công thức (bỏ qua thứ đã tick), món trùng tự cộng dồn; tick khi mua; gửi danh sách qua Zalo.
 - **Tủ lạnh còn gì?** Nhập nguyên liệu đang có, app gợi ý món nấu được và cho biết món nào còn thiếu gì.
+- **Sổ tiền chợ:** tick đã mua thì nhập giá (gõ `25` hay `25k` là 25.000đ).
+  - Xem tổng tiền theo tuần/tháng/năm, có biểu đồ, so với kỳ trước và những thứ tốn tiền nhất.
+  - Mỗi món có **ước tính tiền nấu**, lấy từ giá mua gần nhất.
 
 **Tổ chức**
 - **Danh mục** (thêm, sửa, sắp xếp, chọn emoji) và **bộ sưu tập** (một món có thể nằm trong nhiều bộ).

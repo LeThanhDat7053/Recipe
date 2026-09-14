@@ -21,9 +21,10 @@ export const TABLES = {
   collections: ['id', 'name', 'icon', 'recipe_ids', 'sort_order', 'created_at'],
   shopping_items: ['id', 'name', 'amount', 'unit', 'checked', 'recipe_title', 'sort_order', 'created_at'],
   settings: ['id', 'value'],
+  purchases: ['id', 'shopping_item_id', 'name', 'amount', 'unit', 'price', 'recipe_title', 'note', 'bought_at', 'created_at'],
 }
 // Bảng mới thêm sau: chưa chạy lại schema.sql thì coi như trống, không làm hỏng cả app
-const OPTIONAL_TABLES = new Set(['settings'])
+const OPTIONAL_TABLES = new Set(['settings', 'purchases'])
 export const TABLE_NAMES = Object.keys(TABLES)
 export const emptyDb = () => Object.fromEntries(TABLE_NAMES.map((t) => [t, []]))
 

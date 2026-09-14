@@ -153,6 +153,84 @@ export function splitForShopping(ingredients = [], checkedIds = [], pantry = DEF
   return { need, have, spices }
 }
 
+/* ---------------- Tiền ---------------- */
+
+/** "25" | "25k" | "25.000" | "1tr2" | "1,5tr" -> số đồng. Số nhỏ hơn 1000 hiểu là nghìn */
+export function parsePrice(input) {
+  const s = String(input ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/(vnđ|vnd|đồng|đ)$/, '')
+  if (!s) return null
+  let m = s.match(/^(\d+(?:[.,]\d+)?)(?:tr|triệu|trieu|m)(\d{1,3})?$/)
+  if (m) {
+    const tail = m[2] ? parseInt(m[2].padEnd(3, '0'), 10) * 1000 : 0
+    return Math.round(parseFloat(m[1].replace(',', '.')) * 1e6 + tail)
+  }
+  m = s.match(/^(\d+(?:[.,]\d+)?)(?:k|nghìn|nghin|ngàn|ngan)$/)
+  if (m) return Math.round(parseFloat(m[1].replace(',', '.')) * 1000)
+  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) return parseInt(s.replace(/[.,]/g, ''), 10)
+  if (/^\d+([.,]\d+)?$/.test(s)) {
+    const n = parseFloat(s.replace(',', '.'))
+    return Math.round(n < 1000 ? n * 1000 : n)
+  }
+  return null
+}
+
+export const formatVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(n || 0))}đ`
+
+/** 1250000 -> "1,25tr", 235000 -> "235k" */
+export function formatVndShort(n) {
+  const v = Math.round(n || 0)
+  if (v >= 1e6) return `${String(+(v / 1e6).toFixed(2)).replace('.', ',')}tr`
+  if (v >= 1000) return `${String(+(v / 1000).toFixed(v < 10000 ? 1 : 0)).replace('.', ',')}k`
+  return `${v}đ`
+}
+
+/** Làm tròn tới nghìn cho số ước tính */
+export const roundThousand = (n) => (n >= 1000 ? Math.round(n / 1000) * 1000 : Math.round(n))
+
+const UNIT_BASE = { g: ['mass', 1], gram: ['mass', 1], gam: ['mass', 1], kg: ['mass', 1000], ky: ['mass', 1000], mg: ['mass', 0.001], ml: ['vol', 1], l: ['vol', 1000], lit: ['vol', 1000] }
+function toBaseUnit(qty, unit) {
+  const u = normalize(unit)
+  const base = UNIT_BASE[u]
+  return base ? { kind: base[0], value: qty * base[1] } : { kind: `unit:${u}`, value: qty }
+}
+const sameThing = (a, b) => {
+  const x = normalize(a)
+  const y = normalize(b)
+  return !!x && !!y && (x === y || x.startsWith(`${y} `) || y.startsWith(`${x} `))
+}
+
+/** Ước tính tiền một món từ giá mua gần nhất của từng nguyên liệu (không tính gia vị) */
+export function estimateRecipeCost(recipe, purchases = [], { factor = 1, pantry = DEFAULT_PANTRY } = {}) {
+  const priced = purchases.filter((p) => p.price > 0).sort((a, b) => (b.bought_at || '').localeCompare(a.bought_at || ''))
+  const { need } = splitForShopping(recipe.ingredients || [], [], pantry)
+  const items = need.map((ing) => {
+    const matches = priced.filter((p) => sameThing(p.name, ing.name))
+    if (!matches.length) return { ing, cost: null }
+    const qty = parseAmount(ing.amount)
+    if (qty != null) {
+      for (const p of matches) {
+        const pq = parseAmount(p.amount)
+        if (!pq) continue
+        const a = toBaseUnit(qty * factor, ing.unit)
+        const b = toBaseUnit(pq, p.unit)
+        if (a.kind === b.kind && b.value > 0) return { ing, cost: (p.price * a.value) / b.value, purchase: p, approx: false }
+      }
+    }
+    // Không quy đổi được -> lấy nguyên giá lần mua gần nhất
+    return { ing, cost: matches[0].price, purchase: matches[0], approx: true }
+  })
+  const withCost = items.filter((i) => i.cost != null)
+  return {
+    items,
+    total: withCost.reduce((s, i) => s + i.cost, 0),
+    pricedCount: withCost.length,
+    totalCount: items.length,
+  }
+}
+
 /** Gộp nguyên liệu vào danh sách đi chợ: cùng tên + đơn vị thì cộng dồn */
 export function mergeShopping(existing, incoming) {
   const key = (i) => `${normalize(i.name)}|${normalize(i.unit)}`

@@ -313,14 +313,41 @@ export function StoreProvider({ children }) {
 
       addShoppingItems,
       addShoppingText: (text) => addShoppingItems(text.split('\n').map(parseIngredientLine), ''),
-      toggleShopping(item) {
+      /** Trả về trạng thái mới (true = đã mua). Bỏ tick thì xoá giá đã ghi cho món đó */
+      async toggleShopping(item) {
         const latest = dbRef.current.shopping_items.find((i) => i.id === item.id) || item
-        return upsert('shopping_items', [{ ...latest, checked: !latest.checked }])
+        const checked = !latest.checked
+        await upsert('shopping_items', [{ ...latest, checked }])
+        if (!checked) {
+          const ids = dbRef.current.purchases.filter((p) => p.shopping_item_id === item.id).map((p) => p.id)
+          await remove('purchases', ids)
+        }
+        return checked
       },
       removeShopping: (ids) => remove('shopping_items', ids),
 
       /** Danh sách gia vị có sẵn trong bếp (dùng chung cả nhà) */
       savePantry: (list) => upsert('settings', [{ id: 'pantry', value: list }]),
+
+      /* Sổ tiền chợ */
+      async savePurchase(p) {
+        const now = nowISO()
+        const row = {
+          id: p.id || uid(),
+          shopping_item_id: p.shopping_item_id ?? null,
+          name: (p.name || '').trim() || 'Khoản chi',
+          amount: p.amount || '',
+          unit: p.unit || '',
+          price: Math.max(0, Math.round(p.price || 0)),
+          recipe_title: p.recipe_title || '',
+          note: p.note || '',
+          bought_at: p.bought_at || now,
+          created_at: p.created_at || now,
+        }
+        await upsert('purchases', [row])
+        return row
+      },
+      deletePurchase: (id) => remove('purchases', [id]),
 
       async getShared(shareId) {
         if (!isCloud) return dbRef.current.recipes.find((r) => r.share_id === shareId && !r.deleted_at) || null
@@ -369,6 +396,7 @@ export function StoreProvider({ children }) {
     const pantryRow = db.settings.find((s) => s.id === 'pantry')
     return {
       pantry: Array.isArray(pantryRow?.value) ? pantryRow.value : DEFAULT_PANTRY,
+      purchases: [...db.purchases].sort((a, b) => (b.bought_at || '').localeCompare(a.bought_at || '')),
       recipes,
       trash,
       categories,

@@ -89,6 +89,21 @@ create table if not exists public.settings (
   updated_at timestamptz not null default now()
 );
 
+-- ---------------- Sổ tiền chợ ----------------
+create table if not exists public.purchases (
+  id uuid primary key default gen_random_uuid(),
+  shopping_item_id uuid,                     -- món trong danh sách đi chợ (nếu ghi giá lúc tick)
+  name text not null,
+  amount text not null default '',
+  unit text not null default '',
+  price bigint not null default 0,           -- VNĐ
+  recipe_title text not null default '',
+  note text not null default '',
+  bought_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+create index if not exists purchases_bought_idx on public.purchases(bought_at);
+
 -- Bản cũ có cột user_id (dữ liệu theo tài khoản) -> không dùng nữa
 alter table public.categories drop column if exists user_id;
 alter table public.recipes drop column if exists user_id;
@@ -135,6 +150,10 @@ create policy "family shopping_items" on public.shopping_items for all to anon, 
 alter table public.settings enable row level security;
 drop policy if exists "family settings" on public.settings;
 create policy "family settings" on public.settings for all to anon, authenticated using (true) with check (true);
+
+alter table public.purchases enable row level security;
+drop policy if exists "family purchases" on public.purchases;
+create policy "family purchases" on public.purchases for all to anon, authenticated using (true) with check (true);
 
 -- ------------------------------------------------------------
 -- Xem một món qua link chia sẻ
